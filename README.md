@@ -20,6 +20,14 @@ pip install -r requirements.txt
 python main.py www.dardanel.com.tr --html dardanel-rapor.html --client "Dardanel"
 ```
 
+Kendi kurumsal logonuzu rapora gömmek için `--logo` ekleyin (PNG veya SVG;
+rapora base64 olarak gömülür, ayrı dosya gerekmez):
+
+```bash
+python main.py www.dardanel.com.tr --html dardanel-rapor.html \
+    --client "Dardanel" --logo growity-logo.png
+```
+
 `dardanel-rapor.html` dosyasını tarayıcıda açın; **Ctrl/Cmd + P → PDF olarak
 kaydet** ile teklif/leave-behind PDF'i alın. Canlı demo için sadece:
 

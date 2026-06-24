@@ -1,8 +1,11 @@
 """Reporting: terminal output, JSON/CSV export, and a client-facing HTML report."""
 
+import base64
 import csv
 import html as _html
 import json
+import mimetypes
+import os
 import sys
 from datetime import datetime
 from typing import List, Optional
@@ -102,9 +105,7 @@ def render_terminal(report: AuditReport, color: Optional[bool] = None) -> str:
         lines.append("")
 
     lines.append(_c("═" * 64, "dim", enabled))
-    lines.append(
-        "  " + _summary_line(report)
-    )
+    lines.append("  " + _summary_line(report))
     lines.append(_c("═" * 64, "dim", enabled))
     lines.append("")
     return "\n".join(lines)
@@ -163,8 +164,26 @@ def export_csv(reports: List[AuditReport], path: str) -> None:
 # --------------------------------------------------------------------------- #
 
 SEVERITY_LABEL = {OK: "Başarılı", WARN: "Uyarı", FAIL: "Kritik"}
-_GRADE_COLOR = {"A": "#16a34a", "B": "#16a34a", "C": "#d97706",
-                "D": "#d97706", "E": "#dc2626", "F": "#dc2626"}
+
+# Category accent icons keyed by CategoryResult.key.
+CATEGORY_ICON = {
+    "bot_access": "🤖",
+    "llms_txt": "📄",
+    "schema": "🏷️",
+    "content": "📝",
+    "meta": "🔖",
+    "page_speed": "⚡",
+}
+
+# Built-in Growity wordmark (used when no --logo file is supplied).
+DEFAULT_LOGO_SVG = (
+    '<svg class="logo" viewBox="0 0 232 52" xmlns="http://www.w3.org/2000/svg" '
+    'role="img" aria-label="growity">'
+    '<text x="0" y="40" font-family="\'Trebuchet MS\',Verdana,Geneva,sans-serif" '
+    'font-size="46" font-weight="800" letter-spacing="-3" fill="#2f2f33">growity</text>'
+    '<circle cx="214" cy="13" r="8" fill="none" stroke="#7c3aed" stroke-width="6"/>'
+    "</svg>"
+)
 
 
 def _esc(text: str) -> str:
@@ -179,14 +198,33 @@ def _hue(ratio: float) -> str:
     return "#dc2626"      # red
 
 
-def _priority_actions(report: AuditReport, limit: int = 5) -> List[tuple]:
+def _logo_markup(brand: str, logo_path: str = "") -> str:
+    """Return an <img> data-URI for a supplied logo, else the default wordmark."""
+    if logo_path and os.path.isfile(logo_path):
+        if logo_path.lower().endswith(".svg"):
+            mime = "image/svg+xml"
+        else:
+            mime, _ = mimetypes.guess_type(logo_path)
+            mime = mime or "image/png"
+        try:
+            with open(logo_path, "rb") as fh:
+                data = base64.b64encode(fh.read()).decode("ascii")
+            return (
+                f'<img class="logo" src="data:{mime};base64,{data}" '
+                f'alt="{_esc(brand)}">'
+            )
+        except OSError:
+            pass
+    return DEFAULT_LOGO_SVG
+
+
+def _priority_actions(report: AuditReport, limit: int = 6) -> List[tuple]:
     """Top recommendations, criticals first, with their category name."""
     items = []
     for cat in report.categories:
         for f in cat.findings:
             if f.recommendation and f.severity in (FAIL, WARN):
                 items.append((f.severity, cat.name, f.recommendation))
-    # FAIL before WARN, preserve discovery order otherwise.
     items.sort(key=lambda x: 0 if x[0] == FAIL else 1)
     return items[:limit]
 
@@ -195,95 +233,119 @@ def render_html(
     report: AuditReport,
     brand: str = "Growity",
     client: str = "",
+    logo: str = "",
     generated_at: Optional[str] = None,
 ) -> str:
     when = generated_at or datetime.now().strftime("%d.%m.%Y %H:%M")
-    client_line = f"{_esc(client)} · " if client else ""
-    grade = report.grade if report.reachable else "F"
-    grade_color = _GRADE_COLOR.get(grade, "#dc2626")
+    logo_html = _logo_markup(brand, logo)
+    title = client or report.final_url
 
     if not report.reachable:
         body = f"""
-        <div class="card error">
+        <section class="cover cover-error">
+          <div class="cover-l">
+            <div class="eyebrow">GEO / AIO HAZIRLIK RAPORU</div>
+            <h1>{_esc(title)}</h1>
+            <div class="cover-url">{_esc(report.final_url)}</div>
+          </div>
+        </section>
+        <section class="card error">
           <h2>Sayfaya erişilemedi</h2>
           <p>{_esc(report.error or 'Bilinmeyen hata')}</p>
-        </div>"""
-        return _html_shell(brand, client_line, report.final_url, when, body)
+        </section>"""
+        return _html_shell(logo_html, brand, report.final_url, when, body)
 
     ratio = report.total_score / report.max_score if report.max_score else 0
+    grade = report.grade
+    grade_color = _hue(ratio)
+    deg = round(ratio * 360)
     fails = sum(1 for c in report.categories for f in c.findings if f.severity == FAIL)
     warns = sum(1 for c in report.categories for f in c.findings if f.severity == WARN)
+    oks = sum(1 for c in report.categories for f in c.findings if f.severity == OK)
 
-    # Score hero (conic-gradient gauge).
-    deg = round(ratio * 360)
-    hero = f"""
-    <section class="hero">
-      <div class="gauge" style="background:conic-gradient({grade_color} {deg}deg, #e5e7eb 0deg);">
-        <div class="gauge-inner">
-          <div class="score">{report.total_score:.0f}<span class="of">/100</span></div>
-          <div class="grade" style="color:{grade_color}">Not {grade}</div>
-        </div>
+    # --- Cover: brand-gradient panel with gauge -------------------------
+    cover = f"""
+    <section class="cover">
+      <div class="cover-l">
+        <div class="eyebrow">GEO / AIO HAZIRLIK RAPORU</div>
+        <h1>{_esc(title)}</h1>
+        <a class="cover-url">{_esc(report.final_url)}</a>
+        <div class="cover-meta">Rapor tarihi: {_esc(when)}</div>
       </div>
-      <div class="hero-text">
-        <h2>Genel GEO Skoru</h2>
-        <p class="verdict">{_esc(grade_description(report.total_score))}</p>
-        <div class="pills">
-          <span class="pill pill-fail">{fails} kritik sorun</span>
-          <span class="pill pill-warn">{warns} uyarı</span>
+      <div class="cover-r">
+        <div class="gauge" style="background:conic-gradient(#ffffff {deg}deg, rgba(255,255,255,.22) 0deg);">
+          <div class="gauge-inner">
+            <div class="score" style="color:{grade_color}">{report.total_score:.0f}<span class="of">/100</span></div>
+            <div class="grade">Not {grade}</div>
+          </div>
         </div>
       </div>
     </section>"""
 
-    # Priority actions.
+    # --- Verdict + stat strip -------------------------------------------
+    summary = f"""
+    <section class="summary">
+      <p class="verdict">{_esc(grade_description(report.total_score))}</p>
+      <div class="stats">
+        <div class="stat stat-fail"><b>{fails}</b><span>kritik sorun</span></div>
+        <div class="stat stat-warn"><b>{warns}</b><span>uyarı</span></div>
+        <div class="stat stat-ok"><b>{oks}</b><span>başarılı kontrol</span></div>
+      </div>
+    </section>"""
+
+    # --- Priority actions ------------------------------------------------
     actions = _priority_actions(report)
     if actions:
         rows = "".join(
-            f"""<li><span class="tag tag-{'fail' if sev==FAIL else 'warn'}">{SEVERITY_LABEL[sev]}</span>
-                <span class="act-cat">{_esc(cat)}</span>
-                <span class="act-rec">{_esc(rec)}</span></li>"""
+            f"""<li class="{'pa-fail' if sev==FAIL else 'pa-warn'}">
+                  <span class="pa-tag">{SEVERITY_LABEL[sev]}</span>
+                  <div><span class="pa-cat">{_esc(cat)}</span>
+                  <span class="pa-rec">{_esc(rec)}</span></div>
+                </li>"""
             for sev, cat, rec in actions
         )
         priority = f"""
         <section class="card">
-          <h2>Öncelikli Aksiyonlar</h2>
+          <h2><span class="h2-accent"></span>Öncelikli Aksiyonlar</h2>
           <ol class="actions">{rows}</ol>
         </section>"""
     else:
         priority = ""
 
-    # Category breakdown.
-    cat_blocks = []
+    # --- Category breakdown ---------------------------------------------
+    cat_blocks = ['<section class="card"><h2><span class="h2-accent"></span>Kategori Detayları</h2></section>']
     for cat in report.categories:
         c_ratio = cat.ratio
         color = _hue(c_ratio)
+        icon = CATEGORY_ICON.get(cat.key, "•")
         findings_html = ""
         for f in cat.findings:
             cls = {OK: "ok", WARN: "warn", FAIL: "fail"}[f.severity]
-            icon = {OK: "✓", WARN: "!", FAIL: "✗"}[f.severity]
+            ic = {OK: "✓", WARN: "!", FAIL: "✗"}[f.severity]
             rec = (
-                f'<div class="rec">→ {_esc(f.recommendation)}</div>'
+                f'<div class="rec">{_esc(f.recommendation)}</div>'
                 if f.recommendation else ""
             )
             findings_html += f"""
             <li class="finding {cls}">
-              <span class="ficon">{icon}</span>
+              <span class="ficon">{ic}</span>
               <div><div class="fmsg">{_esc(f.message)}</div>{rec}</div>
             </li>"""
         cat_blocks.append(f"""
-        <section class="card category">
+        <section class="card category" style="border-left:4px solid {color}">
           <div class="cat-head">
-            <h3>{_esc(cat.name)}</h3>
+            <div class="cat-title"><span class="cat-icon">{icon}</span><h3>{_esc(cat.name)}</h3></div>
             <div class="cat-score" style="color:{color}">{cat.score:.1f}<span>/{int(cat.max_score)}</span></div>
           </div>
           <div class="bar"><div class="bar-fill" style="width:{c_ratio*100:.0f}%;background:{color}"></div></div>
           <ul class="findings">{findings_html}</ul>
         </section>""")
 
-    body = hero + priority + "".join(cat_blocks)
-    return _html_shell(brand, client_line, report.final_url, when, body)
+    body = cover + summary + priority + "".join(cat_blocks)
+    return _html_shell(logo_html, brand, report.final_url, when, body)
 
 
-def _html_shell(brand, client_line, url, when, body) -> str:
+def _html_shell(logo_html, brand, url, when, body) -> str:
     return f"""<!DOCTYPE html>
 <html lang="tr">
 <head>
@@ -291,77 +353,111 @@ def _html_shell(brand, client_line, url, when, body) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GEO / AIO Raporu — {_esc(url)}</title>
 <style>
-  :root {{ --brand:#4f46e5; --ink:#0f172a; --muted:#64748b; --line:#e5e7eb; --bg:#f8fafc; }}
+  :root {{
+    --brand:#6d28d9; --brand-deep:#4c1d95; --ring:#7c3aed; --tint:#f5f3ff;
+    --ink:#2f2f33; --muted:#6b7280; --line:#e7e3f3; --bg:#faf9fe;
+  }}
   * {{ box-sizing:border-box; }}
   body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-          color:var(--ink); background:var(--bg); line-height:1.55; }}
-  .wrap {{ max-width:880px; margin:0 auto; padding:32px 24px 64px; }}
-  header.top {{ display:flex; justify-content:space-between; align-items:flex-end;
-               border-bottom:3px solid var(--brand); padding-bottom:16px; margin-bottom:28px; }}
-  .brand {{ font-size:24px; font-weight:800; letter-spacing:-.02em; color:var(--brand); }}
-  .brand small {{ display:block; font-size:12px; font-weight:600; color:var(--muted); letter-spacing:.04em; }}
-  .meta {{ text-align:right; font-size:13px; color:var(--muted); }}
-  .meta .u {{ color:var(--ink); font-weight:600; word-break:break-all; }}
-  h2 {{ font-size:18px; margin:0 0 12px; }}
-  h3 {{ font-size:16px; margin:0; }}
-  .hero {{ display:flex; gap:28px; align-items:center; background:#fff; border:1px solid var(--line);
-           border-radius:16px; padding:28px; margin-bottom:24px; }}
-  .gauge {{ width:150px; height:150px; border-radius:50%; flex:none; display:flex;
-            align-items:center; justify-content:center; }}
-  .gauge-inner {{ width:116px; height:116px; background:#fff; border-radius:50%;
+          color:var(--ink); background:var(--bg); line-height:1.55; -webkit-print-color-adjust:exact; print-color-adjust:exact; }}
+  .wrap {{ max-width:900px; margin:0 auto; padding:28px 24px 64px; }}
+  header.top {{ display:flex; justify-content:space-between; align-items:center;
+               padding-bottom:16px; margin-bottom:22px; border-bottom:1px solid var(--line); }}
+  .logo {{ height:34px; width:auto; display:block; }}
+  .top-label {{ text-align:right; font-size:11px; font-weight:700; letter-spacing:.14em;
+                color:var(--muted); text-transform:uppercase; }}
+  h1 {{ font-size:30px; line-height:1.15; margin:6px 0 8px; letter-spacing:-.02em; }}
+  h2 {{ font-size:17px; margin:0 0 14px; display:flex; align-items:center; gap:10px; }}
+  h3 {{ font-size:15.5px; margin:0; }}
+  .h2-accent {{ width:6px; height:18px; border-radius:3px; background:var(--brand); display:inline-block; }}
+
+  /* Cover */
+  .cover {{ display:flex; justify-content:space-between; align-items:center; gap:24px;
+            background:linear-gradient(135deg,var(--brand),var(--brand-deep)); color:#fff;
+            border-radius:20px; padding:34px 36px; margin-bottom:18px;
+            box-shadow:0 18px 40px -22px rgba(76,29,149,.7); }}
+  .cover-error {{ background:linear-gradient(135deg,#9f1239,#7f1d1d); }}
+  .eyebrow {{ font-size:11px; font-weight:700; letter-spacing:.16em; text-transform:uppercase; opacity:.85; }}
+  .cover-url {{ display:inline-block; font-size:14px; opacity:.92; word-break:break-all; }}
+  .cover-meta {{ font-size:12.5px; opacity:.8; margin-top:10px; }}
+  .gauge {{ width:158px; height:158px; border-radius:50%; flex:none; display:flex;
+            align-items:center; justify-content:center; box-shadow:0 8px 24px -8px rgba(0,0,0,.35); }}
+  .gauge-inner {{ width:122px; height:122px; background:#fff; border-radius:50%;
                   display:flex; flex-direction:column; align-items:center; justify-content:center; }}
-  .score {{ font-size:40px; font-weight:800; line-height:1; }}
-  .score .of {{ font-size:16px; color:var(--muted); font-weight:600; }}
-  .grade {{ font-size:15px; font-weight:700; margin-top:4px; }}
-  .verdict {{ margin:.2em 0 1em; color:var(--muted); }}
-  .pills {{ display:flex; gap:10px; }}
-  .pill {{ font-size:13px; font-weight:600; padding:5px 12px; border-radius:999px; }}
-  .pill-fail {{ background:#fee2e2; color:#b91c1c; }}
-  .pill-warn {{ background:#fef3c7; color:#b45309; }}
-  .card {{ background:#fff; border:1px solid var(--line); border-radius:16px; padding:22px; margin-bottom:18px; }}
+  .score {{ font-size:44px; font-weight:800; line-height:1; }}
+  .score .of {{ font-size:16px; color:var(--muted); font-weight:700; }}
+  .grade {{ font-size:14px; font-weight:800; color:var(--ink); margin-top:2px; }}
+
+  /* Summary strip */
+  .summary {{ display:flex; justify-content:space-between; align-items:center; gap:20px;
+              background:#fff; border:1px solid var(--line); border-radius:16px;
+              padding:18px 22px; margin-bottom:18px; }}
+  .verdict {{ margin:0; font-size:15px; font-weight:600; max-width:54%; }}
+  .stats {{ display:flex; gap:10px; }}
+  .stat {{ text-align:center; border-radius:12px; padding:8px 16px; min-width:78px; }}
+  .stat b {{ display:block; font-size:24px; font-weight:800; line-height:1; }}
+  .stat span {{ font-size:11px; font-weight:600; }}
+  .stat-fail {{ background:#fee2e2; color:#b91c1c; }}
+  .stat-warn {{ background:#fef3c7; color:#b45309; }}
+  .stat-ok {{ background:#dcfce7; color:#15803d; }}
+
+  /* Cards */
+  .card {{ background:#fff; border:1px solid var(--line); border-radius:16px; padding:22px 24px; margin-bottom:16px;
+           box-shadow:0 1px 2px rgba(16,24,40,.04); }}
   .card.error {{ border-color:#fecaca; background:#fff1f2; }}
-  .actions {{ margin:0; padding-left:20px; }}
-  .actions li {{ margin:10px 0; }}
-  .tag {{ font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; margin-right:8px; }}
-  .tag-fail {{ background:#fee2e2; color:#b91c1c; }}
-  .tag-warn {{ background:#fef3c7; color:#b45309; }}
-  .act-cat {{ font-weight:600; }}
-  .act-rec {{ display:block; color:var(--muted); margin-top:2px; }}
-  .cat-head {{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; }}
-  .cat-score {{ font-size:22px; font-weight:800; }}
-  .cat-score span {{ font-size:13px; color:var(--muted); font-weight:600; }}
-  .bar {{ height:8px; background:#eef2f7; border-radius:999px; overflow:hidden; margin-bottom:14px; }}
+
+  /* Priority actions */
+  .actions {{ list-style:none; margin:0; padding:0; counter-reset:pa; }}
+  .actions li {{ display:flex; gap:12px; align-items:flex-start; padding:12px 0; border-top:1px solid var(--line); }}
+  .actions li:first-child {{ border-top:none; }}
+  .pa-tag {{ flex:none; font-size:11px; font-weight:800; padding:3px 9px; border-radius:7px; }}
+  .pa-fail .pa-tag {{ background:#fee2e2; color:#b91c1c; }}
+  .pa-warn .pa-tag {{ background:#fef3c7; color:#b45309; }}
+  .pa-cat {{ font-weight:700; }}
+  .pa-rec {{ display:block; color:var(--muted); margin-top:2px; font-size:14px; }}
+
+  /* Category */
+  .cat-head {{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }}
+  .cat-title {{ display:flex; align-items:center; gap:10px; }}
+  .cat-icon {{ width:34px; height:34px; border-radius:10px; background:var(--tint);
+               display:inline-flex; align-items:center; justify-content:center; font-size:18px; }}
+  .cat-score {{ font-size:23px; font-weight:800; }}
+  .cat-score span {{ font-size:13px; color:var(--muted); font-weight:700; }}
+  .bar {{ height:9px; background:#eef0f5; border-radius:999px; overflow:hidden; margin-bottom:16px; }}
   .bar-fill {{ height:100%; border-radius:999px; }}
   .findings {{ list-style:none; margin:0; padding:0; }}
-  .finding {{ display:flex; gap:10px; padding:8px 0; border-top:1px solid var(--line); }}
+  .finding {{ display:flex; gap:11px; padding:9px 0; border-top:1px solid var(--line); }}
   .finding:first-child {{ border-top:none; }}
   .ficon {{ flex:none; width:22px; height:22px; border-radius:50%; text-align:center;
-            line-height:22px; font-weight:700; font-size:13px; color:#fff; }}
+            line-height:22px; font-weight:800; font-size:13px; color:#fff; }}
   .finding.ok .ficon {{ background:#16a34a; }}
   .finding.warn .ficon {{ background:#d97706; }}
   .finding.fail .ficon {{ background:#dc2626; }}
   .fmsg {{ font-size:14px; }}
-  .rec {{ font-size:13px; color:var(--muted); margin-top:2px; }}
-  footer {{ margin-top:32px; padding-top:16px; border-top:1px solid var(--line);
-            font-size:12px; color:var(--muted); text-align:center; }}
+  .rec {{ font-size:13px; color:var(--muted); margin-top:3px; padding-left:12px; border-left:2px solid var(--line); }}
+
+  footer {{ margin-top:30px; padding-top:18px; border-top:1px solid var(--line);
+            font-size:11.5px; color:var(--muted); text-align:center; }}
+  footer .scoring {{ margin-top:6px; }}
+
   @media print {{
     body {{ background:#fff; }}
     .wrap {{ max-width:100%; padding:0; }}
-    .card, .hero {{ break-inside:avoid; border-color:#d1d5db; }}
-    header.top {{ position:running(header); }}
+    .card, .cover, .summary {{ break-inside:avoid; }}
+    .cover {{ box-shadow:none; }}
   }}
 </style>
 </head>
 <body>
   <div class="wrap">
     <header class="top">
-      <div class="brand">{_esc(brand)}<small>GEO / AIO HAZIRLIK RAPORU</small></div>
-      <div class="meta"><div class="u">{client_line}{_esc(url)}</div><div>{_esc(when)}</div></div>
+      {logo_html}
+      <div class="top-label">GEO / AIO<br>Hazırlık Raporu</div>
     </header>
     {body}
     <footer>
-      Bu rapor {_esc(brand)} GEO/AIO Audit aracı ile üretilmiştir · {_esc(when)}<br>
-      Skorlama: AI Bot Erişimi (25) · llms.txt (10) · Schema (25) · İçerik (20) · Meta (10) · Hız/Taranabilirlik (10)
+      Bu rapor <b>{_esc(brand)}</b> GEO/AIO Audit aracı ile üretilmiştir · {_esc(when)}
+      <div class="scoring">Skorlama ağırlıkları: AI Bot Erişimi 25 · llms.txt 10 · Schema 25 · İçerik 20 · Meta 10 · Hız/Taranabilirlik 10</div>
     </footer>
   </div>
 </body>
@@ -373,6 +469,7 @@ def export_html(
     path: str,
     brand: str = "Growity",
     client: str = "",
+    logo: str = "",
 ) -> None:
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write(render_html(report, brand=brand, client=client))
+        fh.write(render_html(report, brand=brand, client=client, logo=logo))

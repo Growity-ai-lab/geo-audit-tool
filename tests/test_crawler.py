@@ -5,6 +5,7 @@ from geo_audit.crawler import (
     SPEED_MAX_SCORE,
     Crawler,
     CrawlResult,
+    _looks_like_html,
     analyze_bot_access,
     analyze_page_speed,
     normalize_url,
@@ -14,6 +15,15 @@ from geo_audit.crawler import (
 def test_normalize_url_adds_scheme():
     assert normalize_url("example.com") == "https://example.com"
     assert normalize_url("http://x.com") == "http://x.com"
+
+
+def test_looks_like_html_detects_soft_404():
+    # A soft-404 page served for a missing /llms.txt must be rejected.
+    assert _looks_like_html("<!DOCTYPE html><html><head>...") is True
+    assert _looks_like_html("<html lang='tr'><body>404</body></html>") is True
+    # A real llms.txt (markdown) must NOT be flagged as HTML.
+    assert _looks_like_html("# Acme\n\n## Docs\n- https://acme.com/x") is False
+    assert _looks_like_html("") is False
 
 
 def test_all_bots_allowed_full_score():

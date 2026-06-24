@@ -66,6 +66,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Client name shown in the HTML report header (e.g. Dardanel).",
     )
     parser.add_argument(
+        "--logo",
+        default="",
+        metavar="PATH",
+        help="Path to a logo image (PNG/SVG) embedded in the HTML report header. "
+        "If omitted, the built-in Growity wordmark is used.",
+    )
+    parser.add_argument(
         "--timeout",
         type=int,
         default=15,
@@ -130,7 +137,8 @@ def _run_batch(args) -> int:
         ext = ext or ".html"
         for n, report in enumerate(reports, start=1):
             path = f"{stem}-{n}{ext}"
-            export_html(report, path, brand=args.brand, client=args.client)
+            export_html(report, path, brand=args.brand, client=args.client,
+                        logo=args.logo)
         if not args.quiet:
             print(f"{len(reports)} HTML raporu yazıldı: {stem}-N{ext}")
 
@@ -174,7 +182,8 @@ def main(argv=None) -> int:
                 print(f"JSON raporu yazıldı: {args.json}")
 
     if args.html:
-        export_html(report, args.html, brand=args.brand, client=args.client)
+        export_html(report, args.html, brand=args.brand, client=args.client,
+                    logo=args.logo)
         if not args.quiet:
             print(f"HTML raporu yazıldı: {args.html}")
 

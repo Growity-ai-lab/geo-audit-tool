@@ -45,6 +45,22 @@ DEFAULT_UA = (
 )
 
 
+def _looks_like_html(text: str) -> bool:
+    """True if the body is (most likely) an HTML page, e.g. a soft-404.
+
+    Sidecar files like robots.txt and llms.txt are plain text. Many servers
+    answer requests for a missing /llms.txt with a 200 status and an HTML
+    page (a "soft 404"), which must NOT be treated as a real file.
+    """
+    head = (text or "")[:2000].lower()
+    return (
+        "<!doctype html" in head
+        or "<html" in head
+        or "<head" in head
+        or "<body" in head
+    )
+
+
 @dataclass
 class CrawlResult:
     """Everything gathered from the network for a single audit run."""
@@ -148,7 +164,12 @@ class Crawler:
         robots_url = urljoin(result.base_url + "/", "robots.txt")
         resp = self._fetch_text(robots_url)
 
-        if resp is not None and resp.status_code == 200 and resp.text.strip():
+        if (
+            resp is not None
+            and resp.status_code == 200
+            and resp.text.strip()
+            and not _looks_like_html(resp.text)  # reject HTML soft-404s
+        ):
             result.robots_found = True
             result.robots_text = resp.text
             result.bot_access = self._parse_bot_access(
@@ -173,18 +194,21 @@ class Crawler:
         return access
 
     def _check_llms_txt(self, result: CrawlResult) -> None:
+        result.llms_txt_found = False
         llms_url = urljoin(result.base_url + "/", "llms.txt")
         resp = self._fetch_text(llms_url)
-        if (
-            resp is not None
-            and resp.status_code == 200
-            and resp.text.strip()
-            and "text" in resp.headers.get("Content-Type", "text/plain").lower()
-        ):
-            result.llms_txt_found = True
-            result.llms_txt_url = llms_url
-        else:
-            result.llms_txt_found = False
+        if resp is None or resp.status_code != 200 or not resp.text.strip():
+            return
+
+        content_type = resp.headers.get("Content-Type", "").lower()
+        # A real llms.txt is plain text / markdown — never an HTML page.
+        # Reject explicit HTML content-types AND bodies that look like HTML
+        # (covers soft-404s served as 200 with the wrong/missing content-type).
+        if "html" in content_type or _looks_like_html(resp.text):
+            return
+
+        result.llms_txt_found = True
+        result.llms_txt_url = llms_url
 
     def _check_sitemap(self, result: CrawlResult) -> None:
         # Prefer a Sitemap: directive in robots.txt, else fall back to the

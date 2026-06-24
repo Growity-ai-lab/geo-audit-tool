@@ -21,7 +21,8 @@ def test_html_contains_branding_and_score():
     assert 'lang="tr"' in out
     assert "Growity" in out
     assert "Dardanel" in out
-    assert "Genel GEO Skoru" in out
+    assert "/100" in out
+    assert "Kategori Detayları" in out
 
 
 def test_html_escapes_client_input():
