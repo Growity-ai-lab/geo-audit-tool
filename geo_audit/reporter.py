@@ -198,24 +198,37 @@ def _hue(ratio: float) -> str:
     return "#dc2626"      # red
 
 
+def _embed_image(path: str) -> Optional[str]:
+    """Return a base64 data-URI for an image file, or None if unavailable."""
+    if not path or not os.path.isfile(path):
+        return None
+    if path.lower().endswith(".svg"):
+        mime = "image/svg+xml"
+    else:
+        mime, _ = mimetypes.guess_type(path)
+        mime = mime or "image/png"
+    try:
+        with open(path, "rb") as fh:
+            data = base64.b64encode(fh.read()).decode("ascii")
+    except OSError:
+        return None
+    return f"data:{mime};base64,{data}"
+
+
 def _logo_markup(brand: str, logo_path: str = "") -> str:
-    """Return an <img> data-URI for a supplied logo, else the default wordmark."""
-    if logo_path and os.path.isfile(logo_path):
-        if logo_path.lower().endswith(".svg"):
-            mime = "image/svg+xml"
-        else:
-            mime, _ = mimetypes.guess_type(logo_path)
-            mime = mime or "image/png"
-        try:
-            with open(logo_path, "rb") as fh:
-                data = base64.b64encode(fh.read()).decode("ascii")
-            return (
-                f'<img class="logo" src="data:{mime};base64,{data}" '
-                f'alt="{_esc(brand)}">'
-            )
-        except OSError:
-            pass
+    """Brand logo as an <img> data-URI, else the built-in Growity wordmark."""
+    uri = _embed_image(logo_path)
+    if uri:
+        return f'<img class="logo" src="{uri}" alt="{_esc(brand)}">'
     return DEFAULT_LOGO_SVG
+
+
+def _client_logo_markup(client: str, logo_path: str = "") -> str:
+    """Client logo chip for the cover panel (empty string if none)."""
+    uri = _embed_image(logo_path)
+    if not uri:
+        return ""
+    return f'<div class="client-logo"><img src="{uri}" alt="{_esc(client)}"></div>'
 
 
 def _priority_actions(report: AuditReport, limit: int = 6) -> List[tuple]:
@@ -234,10 +247,12 @@ def render_html(
     brand: str = "Growity",
     client: str = "",
     logo: str = "",
+    client_logo: str = "",
     generated_at: Optional[str] = None,
 ) -> str:
     when = generated_at or datetime.now().strftime("%d.%m.%Y %H:%M")
     logo_html = _logo_markup(brand, logo)
+    client_logo_html = _client_logo_markup(client, client_logo)
     title = client or report.final_url
 
     if not report.reachable:
@@ -245,6 +260,7 @@ def render_html(
         <section class="cover cover-error">
           <div class="cover-l">
             <div class="eyebrow">GEO / AIO HAZIRLIK RAPORU</div>
+            {client_logo_html}
             <h1>{_esc(title)}</h1>
             <div class="cover-url">{_esc(report.final_url)}</div>
           </div>
@@ -268,6 +284,7 @@ def render_html(
     <section class="cover">
       <div class="cover-l">
         <div class="eyebrow">GEO / AIO HAZIRLIK RAPORU</div>
+        {client_logo_html}
         <h1>{_esc(title)}</h1>
         <a class="cover-url">{_esc(report.final_url)}</a>
         <div class="cover-meta">Rapor tarihi: {_esc(when)}</div>
@@ -292,6 +309,8 @@ def render_html(
         <div class="stat stat-ok"><b>{oks}</b><span>başarılı kontrol</span></div>
       </div>
     </section>"""
+
+    explain = _explainer_block(report.grade)
 
     # --- Priority actions ------------------------------------------------
     actions = _priority_actions(report)
@@ -341,8 +360,61 @@ def render_html(
           <ul class="findings">{findings_html}</ul>
         </section>""")
 
-    body = cover + summary + priority + "".join(cat_blocks)
+    offering = _offering_block(brand)
+
+    body = cover + summary + explain + priority + "".join(cat_blocks) + offering
     return _html_shell(logo_html, brand, report.final_url, when, body)
+
+
+# Grade bands shown in the explainer legend.
+_GRADE_BANDS = [
+    ("A", "90-100", "Mükemmel"),
+    ("B", "80-89", "İyi"),
+    ("C", "70-79", "Orta-iyi"),
+    ("D", "60-69", "Orta"),
+    ("E", "50-59", "Zayıf"),
+    ("F", "0-49", "Kritik"),
+]
+
+
+def _explainer_block(grade: str) -> str:
+    bands = "".join(
+        f'<div class="band{" band-on" if g == grade else ""}">'
+        f'<b>{g}</b><span>{rng}</span><span>{lbl}</span></div>'
+        for g, rng, lbl in _GRADE_BANDS
+    )
+    return f"""
+    <section class="card explain">
+      <h2><span class="h2-accent"></span>Bu Rapor Ne Anlama Geliyor?</h2>
+      <p>Arama artık yalnızca Google'da değil. ChatGPT, Claude, Perplexity ve
+      Google AI Overviews gibi yapay zekâ motorları kullanıcıların sorularını
+      doğrudan yanıtlıyor ve kaynak gösteriyor. <b>GEO (Generative Engine
+      Optimization)</b>, markanızın bu yanıtlarda görünür ve alıntılanabilir
+      olmasını sağlar. Bu rapor, sitenizin yapay zekâ motorlarına ne kadar hazır
+      olduğunu 6 kategoride 100 puan üzerinden ölçer; düşük puanlı alanlar en
+      yüksek getirili iyileştirme fırsatlarınızı gösterir.</p>
+      <div class="bands">{bands}</div>
+    </section>"""
+
+
+def _offering_block(brand: str) -> str:
+    items = [
+        "AI tarayıcı erişimi: robots.txt ve llms.txt yapılandırması",
+        "Schema.org işaretlemesi (FAQ, Organization, HowTo, Article)",
+        "Önce-cevap (answer-first) içerik mimarisi ve başlık hiyerarşisi",
+        "Meta sinyalleri, Open Graph ve varlık (entity) optimizasyonu",
+        "Teknik performans ve taranabilirlik iyileştirmeleri",
+        "Aylık GEO görünürlük takibi ve raporlama",
+    ]
+    lis = "".join(f"<li>{_esc(i)}</li>" for i in items)
+    return f"""
+    <section class="card cta">
+      <h2><span class="h2-accent"></span>{_esc(brand)} ile Sonraki Adımlar</h2>
+      <p>Yukarıdaki bulguların her biri somut bir iyileştirme kalemine karşılık
+      gelir. {_esc(brand)} olarak sitenizi yapay zekâ arama motorlarında
+      görünür ve alıntılanabilir hâle getirmek için uçtan uca destek sunuyoruz:</p>
+      <ul class="offer">{lis}</ul>
+    </section>"""
 
 
 def _html_shell(logo_html, brand, url, when, body) -> str:
@@ -378,6 +450,9 @@ def _html_shell(logo_html, brand, url, when, body) -> str:
             box-shadow:0 18px 40px -22px rgba(76,29,149,.7); }}
   .cover-error {{ background:linear-gradient(135deg,#9f1239,#7f1d1d); }}
   .eyebrow {{ font-size:11px; font-weight:700; letter-spacing:.16em; text-transform:uppercase; opacity:.85; }}
+  .client-logo {{ display:inline-block; background:#fff; border-radius:10px; padding:8px 12px;
+                  margin:12px 0 4px; box-shadow:0 6px 18px -8px rgba(0,0,0,.4); }}
+  .client-logo img {{ height:30px; width:auto; display:block; }}
   .cover-url {{ display:inline-block; font-size:14px; opacity:.92; word-break:break-all; }}
   .cover-meta {{ font-size:12.5px; opacity:.8; margin-top:10px; }}
   .gauge {{ width:158px; height:158px; border-radius:50%; flex:none; display:flex;
@@ -436,6 +511,24 @@ def _html_shell(logo_html, brand, url, when, body) -> str:
   .fmsg {{ font-size:14px; }}
   .rec {{ font-size:13px; color:var(--muted); margin-top:3px; padding-left:12px; border-left:2px solid var(--line); }}
 
+  /* Explainer + bands */
+  .explain p {{ margin:0 0 16px; font-size:14px; }}
+  .bands {{ display:grid; grid-template-columns:repeat(6,1fr); gap:8px; }}
+  .band {{ text-align:center; border:1px solid var(--line); border-radius:10px; padding:8px 4px; background:#fff; }}
+  .band b {{ display:block; font-size:18px; font-weight:800; }}
+  .band span {{ display:block; font-size:10.5px; color:var(--muted); }}
+  .band-on {{ background:var(--tint); border-color:var(--brand); box-shadow:0 0 0 2px var(--brand) inset; }}
+  .band-on b {{ color:var(--brand); }}
+
+  /* CTA / offering */
+  .cta {{ background:linear-gradient(135deg,var(--tint),#fff); border-color:var(--brand); }}
+  .cta p {{ font-size:14px; margin:0 0 14px; }}
+  .offer {{ margin:0; padding:0; list-style:none; display:grid; grid-template-columns:1fr 1fr; gap:10px 22px; }}
+  .offer li {{ position:relative; padding-left:26px; font-size:14px; font-weight:500; }}
+  .offer li::before {{ content:"✓"; position:absolute; left:0; top:0; width:18px; height:18px;
+                       background:var(--brand); color:#fff; border-radius:50%; font-size:11px;
+                       font-weight:800; text-align:center; line-height:18px; }}
+
   footer {{ margin-top:30px; padding-top:18px; border-top:1px solid var(--line);
             font-size:11.5px; color:var(--muted); text-align:center; }}
   footer .scoring {{ margin-top:6px; }}
@@ -470,6 +563,8 @@ def export_html(
     brand: str = "Growity",
     client: str = "",
     logo: str = "",
+    client_logo: str = "",
 ) -> None:
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write(render_html(report, brand=brand, client=client, logo=logo))
+        fh.write(render_html(report, brand=brand, client=client, logo=logo,
+                             client_logo=client_logo))

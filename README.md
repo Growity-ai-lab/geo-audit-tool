@@ -25,8 +25,11 @@ rapora base64 olarak gömülür, ayrı dosya gerekmez):
 
 ```bash
 python main.py www.dardanel.com.tr --html dardanel-rapor.html \
-    --client "Dardanel" --logo growity-logo.png
+    --client "Dardanel" --logo growity-logo.png --client-logo dardanel-logo.png
 ```
+
+`--logo` ajansınızın (başlık), `--client-logo` ise müşterinin (kapak) logosunu
+gömer. Her ikisi de PNG/SVG kabul eder ve rapora base64 olarak gömülür.
 
 `dardanel-rapor.html` dosyasını tarayıcıda açın; **Ctrl/Cmd + P → PDF olarak
 kaydet** ile teklif/leave-behind PDF'i alın. Canlı demo için sadece:

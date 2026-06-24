@@ -73,6 +73,12 @@ def build_parser() -> argparse.ArgumentParser:
         "If omitted, the built-in Growity wordmark is used.",
     )
     parser.add_argument(
+        "--client-logo",
+        default="",
+        metavar="PATH",
+        help="Path to the client's logo (PNG/SVG), shown on the report cover.",
+    )
+    parser.add_argument(
         "--timeout",
         type=int,
         default=15,
@@ -138,7 +144,7 @@ def _run_batch(args) -> int:
         for n, report in enumerate(reports, start=1):
             path = f"{stem}-{n}{ext}"
             export_html(report, path, brand=args.brand, client=args.client,
-                        logo=args.logo)
+                        logo=args.logo, client_logo=args.client_logo)
         if not args.quiet:
             print(f"{len(reports)} HTML raporu yazıldı: {stem}-N{ext}")
 
@@ -183,7 +189,7 @@ def main(argv=None) -> int:
 
     if args.html:
         export_html(report, args.html, brand=args.brand, client=args.client,
-                    logo=args.logo)
+                    logo=args.logo, client_logo=args.client_logo)
         if not args.quiet:
             print(f"HTML raporu yazıldı: {args.html}")
 
