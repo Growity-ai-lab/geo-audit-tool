@@ -3,6 +3,7 @@
 
 Usage:
     python main.py https://example.com
+    python main.py example.com --html rapor.html --client "Dardanel"
     python main.py example.com --json report.json
     python main.py example.com --json -            # JSON to stdout
     python main.py example.com --no-color
@@ -14,7 +15,13 @@ import sys
 from geo_audit import __version__
 from geo_audit.batch import audit_many, read_url_list
 from geo_audit.crawler import Crawler
-from geo_audit.reporter import export_csv, export_json, print_report, to_json
+from geo_audit.reporter import (
+    export_csv,
+    export_html,
+    export_json,
+    print_report,
+    to_json,
+)
 from geo_audit.scorer import score
 
 
@@ -44,6 +51,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Export the report as JSON. Use '-' to write JSON to stdout.",
     )
     parser.add_argument(
+        "--html",
+        metavar="PATH",
+        help="Export a client-facing Turkish HTML report (printable to PDF).",
+    )
+    parser.add_argument(
+        "--brand",
+        default="Growity",
+        help="Brand name shown in the HTML report header (default: Growity).",
+    )
+    parser.add_argument(
+        "--client",
+        default="",
+        help="Client name shown in the HTML report header (e.g. Dardanel).",
+    )
+    parser.add_argument(
         "--timeout",
         type=int,
         default=15,
@@ -70,7 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
 def _run_batch(args) -> int:
     urls = read_url_list(args.batch)
     if not urls:
-        print(f"No URLs found in {args.batch}", file=sys.stderr)
+        print(f"{args.batch} içinde URL bulunamadı.", file=sys.stderr)
         return 2
 
     def on_progress(i, total, report):
@@ -78,7 +100,7 @@ def _run_batch(args) -> int:
             status = (
                 f"{report.total_score:.0f}/100 ({report.grade})"
                 if report.reachable
-                else "unreachable"
+                else "erişilemedi"
             )
             print(f"[{i}/{total}] {report.url} → {status}")
 
@@ -87,7 +109,7 @@ def _run_batch(args) -> int:
     if args.csv:
         export_csv(reports, args.csv)
         if not args.quiet:
-            print(f"CSV summary written to {args.csv}")
+            print(f"CSV özeti yazıldı: {args.csv}")
     if args.json and args.json != "-":
         # Write a combined JSON array for batch runs.
         import json as _json
@@ -99,11 +121,23 @@ def _run_batch(args) -> int:
                 )
             )
         if not args.quiet:
-            print(f"JSON report written to {args.json}")
+            print(f"JSON raporu yazıldı: {args.json}")
+    if args.html:
+        # One HTML file per URL: <stem>-<n><suffix>.
+        import os
 
-    if not args.csv and not args.json and not args.quiet:
+        stem, ext = os.path.splitext(args.html)
+        ext = ext or ".html"
+        for n, report in enumerate(reports, start=1):
+            path = f"{stem}-{n}{ext}"
+            export_html(report, path, brand=args.brand, client=args.client)
+        if not args.quiet:
+            print(f"{len(reports)} HTML raporu yazıldı: {stem}-N{ext}")
+
+    if not args.csv and not args.json and not args.html and not args.quiet:
         print(
-            "Tip: add --csv summary.csv or --json out.json to capture batch results."
+            "İpucu: sonuçları kaydetmek için --csv ozet.csv, --json out.json "
+            "veya --html rapor.html ekleyin."
         )
 
     reachable = [r for r in reports if r.reachable]
@@ -119,7 +153,7 @@ def main(argv=None) -> int:
         return _run_batch(args)
 
     if not args.url:
-        print("error: a URL or --batch FILE is required.", file=sys.stderr)
+        print("hata: bir URL veya --batch DOSYA gerekli.", file=sys.stderr)
         return 2
 
     crawler = Crawler(timeout=args.timeout)
@@ -137,7 +171,12 @@ def main(argv=None) -> int:
         else:
             export_json(report, args.json)
             if not args.quiet:
-                print(f"JSON report written to {args.json}")
+                print(f"JSON raporu yazıldı: {args.json}")
+
+    if args.html:
+        export_html(report, args.html, brand=args.brand, client=args.client)
+        if not args.quiet:
+            print(f"HTML raporu yazıldı: {args.html}")
 
     # Exit code reflects reachability and a passing-ish score.
     if not report.reachable:

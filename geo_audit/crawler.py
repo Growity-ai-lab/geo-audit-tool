@@ -221,27 +221,27 @@ def analyze_bot_access(result: CrawlResult) -> CategoryResult:
         findings.append(
             Finding(
                 OK,
-                "No robots.txt found — AI crawlers are not blocked by default.",
-                "Consider adding a robots.txt that explicitly allows GPTBot, "
-                "ClaudeBot and PerplexityBot to make intent clear.",
+                "robots.txt bulunamadı — AI tarayıcıları varsayılan olarak engellenmiyor.",
+                "Niyeti netleştirmek için GPTBot, ClaudeBot ve PerplexityBot'a açıkça "
+                "izin veren bir robots.txt eklemeyi değerlendirin.",
             )
         )
 
     for bot in allowed:
-        findings.append(Finding(OK, f"{bot} is allowed to crawl this page."))
+        findings.append(Finding(OK, f"{bot} bu sayfayı tarayabiliyor."))
     for bot in blocked:
         findings.append(
             Finding(
                 FAIL,
-                f"{bot} is blocked by robots.txt.",
-                f"Remove the Disallow rule for {bot} so this AI engine can index "
-                "and cite your content.",
+                f"{bot} robots.txt tarafından engelleniyor.",
+                f"{bot} için Disallow kuralını kaldırın; böylece bu AI motoru "
+                "içeriğinizi indeksleyip alıntılayabilir.",
             )
         )
 
     return CategoryResult(
         key="bot_access",
-        name="AI Bot Access",
+        name="AI Bot Erişimi",
         score=score,
         max_score=BOT_MAX_SCORE,
         findings=findings,
@@ -256,62 +256,62 @@ def analyze_page_speed(result: CrawlResult) -> CategoryResult:
     # Status code.
     if result.status_code == 200:
         score += W_STATUS_OK
-        findings.append(Finding(OK, "Page returns HTTP 200 OK."))
+        findings.append(Finding(OK, "Sayfa HTTP 200 OK yanıtı veriyor."))
     else:
         findings.append(
             Finding(
                 FAIL,
-                f"Page returned HTTP {result.status_code}.",
-                "Ensure the canonical URL responds with 200 for crawlers.",
+                f"Sayfa HTTP {result.status_code} yanıtı verdi.",
+                "Kanonik URL'nin tarayıcılara 200 yanıtı verdiğinden emin olun.",
             )
         )
 
     # Response time.
     ms = result.elapsed_ms
     if ms is None:
-        findings.append(Finding(WARN, "Response time could not be measured."))
+        findings.append(Finding(WARN, "Yanıt süresi ölçülemedi."))
     elif ms <= FAST_MS:
         score += W_RESPONSE_TIME
-        findings.append(Finding(OK, f"Fast server response ({ms:.0f} ms)."))
+        findings.append(Finding(OK, f"Hızlı sunucu yanıtı ({ms:.0f} ms)."))
     elif ms <= SLOW_MS:
         score += W_RESPONSE_TIME / 2
         findings.append(
             Finding(
                 WARN,
-                f"Moderate server response ({ms:.0f} ms).",
-                "Aim for < 800 ms TTFB to keep crawlers from throttling your site.",
+                f"Orta düzey sunucu yanıtı ({ms:.0f} ms).",
+                "Tarayıcıların sitenizi kısıtlamaması için < 800 ms TTFB hedefleyin.",
             )
         )
     else:
         findings.append(
             Finding(
                 FAIL,
-                f"Slow server response ({ms:.0f} ms).",
-                "Reduce server response time (caching, CDN) — slow pages get "
-                "crawled less frequently.",
+                f"Yavaş sunucu yanıtı ({ms:.0f} ms).",
+                "Sunucu yanıt süresini azaltın (önbellek, CDN) — yavaş sayfalar daha "
+                "seyrek taranır.",
             )
         )
 
     # HTTPS.
     if result.is_https:
         score += W_HTTPS
-        findings.append(Finding(OK, "Served over HTTPS."))
+        findings.append(Finding(OK, "HTTPS üzerinden sunuluyor."))
     else:
         findings.append(
-            Finding(FAIL, "Not served over HTTPS.", "Serve the site over HTTPS.")
+            Finding(FAIL, "HTTPS üzerinden sunulmuyor.", "Siteyi HTTPS üzerinden sunun.")
         )
 
     # Compression.
     encoding = result.headers.get("content-encoding", "").lower()
     if any(enc in encoding for enc in ("gzip", "br", "deflate", "zstd")):
         score += W_COMPRESSION
-        findings.append(Finding(OK, f"Response is compressed ({encoding})."))
+        findings.append(Finding(OK, f"Yanıt sıkıştırılmış ({encoding})."))
     else:
         findings.append(
             Finding(
                 WARN,
-                "No content compression detected.",
-                "Enable gzip or Brotli compression to speed up delivery.",
+                "İçerik sıkıştırması tespit edilmedi.",
+                "Daha hızlı teslim için gzip veya Brotli sıkıştırmasını etkinleştirin.",
             )
         )
 
@@ -319,24 +319,24 @@ def analyze_page_speed(result: CrawlResult) -> CategoryResult:
     if result.sitemap_found:
         score += W_SITEMAP
         count = (
-            f" ({result.sitemap_url_count} URLs)"
+            f" ({result.sitemap_url_count} URL)"
             if result.sitemap_url_count
             else ""
         )
-        findings.append(Finding(OK, f"Sitemap found at {result.sitemap_url}{count}."))
+        findings.append(Finding(OK, f"Sitemap bulundu: {result.sitemap_url}{count}."))
     else:
         findings.append(
             Finding(
                 WARN,
-                "No XML sitemap found.",
-                "Publish a sitemap.xml and reference it from robots.txt so crawlers "
-                "can discover all your pages.",
+                "XML sitemap bulunamadı.",
+                "Bir sitemap.xml yayınlayın ve robots.txt'den referans verin; böylece "
+                "tarayıcılar tüm sayfalarınızı keşfedebilir.",
             )
         )
 
     return CategoryResult(
         key="page_speed",
-        name="Page Speed / Crawlability",
+        name="Sayfa Hızı / Taranabilirlik",
         score=min(SPEED_MAX_SCORE, score),
         max_score=SPEED_MAX_SCORE,
         findings=findings,

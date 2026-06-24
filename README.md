@@ -9,6 +9,24 @@ GEO is the practice of optimizing content so that AI answer engines
 (ChatGPT, Claude, Perplexity, Google AI Overviews, etc.) can **access**,
 **understand**, and **cite** it.
 
+> Çıktılar (terminal raporu ve HTML raporu) **Türkçedir**.
+
+## Müşteri sunumu için hızlı başlangıç
+
+Bir müşteri sitesini tarayıp sunum kalitesinde Türkçe HTML rapor üretmek:
+
+```bash
+pip install -r requirements.txt
+python main.py www.dardanel.com.tr --html dardanel-rapor.html --client "Dardanel"
+```
+
+`dardanel-rapor.html` dosyasını tarayıcıda açın; **Ctrl/Cmd + P → PDF olarak
+kaydet** ile teklif/leave-behind PDF'i alın. Canlı demo için sadece:
+
+```bash
+python main.py www.dardanel.com.tr
+```
+
 ## Installation
 
 ```bash
@@ -30,6 +48,9 @@ python main.py example.com
 
 # Export JSON to a file
 python main.py example.com --json report.json
+
+# Türkçe HTML rapor (PDF'e basılabilir, markalı)
+python main.py example.com --html rapor.html --client "Müşteri Adı"
 
 # Print JSON to stdout (machine-readable, no terminal report)
 python main.py example.com --json -

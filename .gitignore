@@ -6,3 +6,8 @@ venv/
 *.json
 !package.json
 .DS_Store
+
+# Generated reports
+ornek-rapor.html
+*-report.html
+rapor*.html

@@ -33,7 +33,7 @@ def test_article_alias_counts_as_article():
     """
     result = schema_checker.analyze(html)
     assert result.score == POINTS_PER_TYPE
-    assert any("Article schema detected" in f.message for f in result.findings)
+    assert any("Article şeması tespit edildi" in f.message for f in result.findings)
 
 
 def test_type_as_list_is_parsed():

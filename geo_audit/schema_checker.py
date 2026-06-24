@@ -107,18 +107,18 @@ def analyze(html: str) -> CategoryResult:
         findings.append(
             Finding(
                 FAIL,
-                "No JSON-LD or schema.org structured data found.",
-                "Add JSON-LD markup (e.g. Organization + Article) so AI engines "
-                "can reliably parse and cite your content.",
+                "JSON-LD veya schema.org yapısal verisi bulunamadı.",
+                "AI motorlarının içeriğinizi güvenilir şekilde ayrıştırıp alıntılayabilmesi "
+                "için JSON-LD işaretlemesi ekleyin (ör. Organization + Article).",
             )
         )
     elif not has_any_jsonld and micro_types:
         findings.append(
             Finding(
                 WARN,
-                "Only microdata found; no JSON-LD blocks detected.",
-                "Prefer JSON-LD (<script type=\"application/ld+json\">), the format "
-                "most reliably consumed by AI crawlers.",
+                "Yalnızca microdata bulundu; JSON-LD bloğu yok.",
+                "AI tarayıcılarının en güvenilir tükettiği format olan JSON-LD'yi "
+                "(<script type=\"application/ld+json\">) tercih edin.",
             )
         )
 
@@ -126,13 +126,13 @@ def analyze(html: str) -> CategoryResult:
     for key, label in KEY_TYPES.items():
         if key in present_keys:
             findings.append(
-                Finding(OK, f"{label} schema detected.")
+                Finding(OK, f"{label} şeması tespit edildi.")
             )
         else:
             findings.append(
                 Finding(
                     WARN,
-                    f"{label} schema not found.",
+                    f"{label} şeması bulunamadı.",
                     _recommendation_for(key),
                 )
             )
@@ -143,7 +143,7 @@ def analyze(html: str) -> CategoryResult:
         findings.append(
             Finding(
                 OK,
-                "Additional structured-data types present: "
+                "Diğer yapısal veri türleri mevcut: "
                 + ", ".join(extras[:8])
                 + ("…" if len(extras) > 8 else ""),
             )
@@ -151,7 +151,7 @@ def analyze(html: str) -> CategoryResult:
 
     return CategoryResult(
         key="schema",
-        name="Schema Markup",
+        name="Schema İşaretlemesi",
         score=score,
         max_score=MAX_SCORE,
         findings=findings,
@@ -160,13 +160,13 @@ def analyze(html: str) -> CategoryResult:
 
 def _recommendation_for(key: str) -> str:
     tips = {
-        "faqpage": "Add FAQPage schema for Q&A content — strongly favored by AI "
-                   "answer engines.",
-        "organization": "Add Organization schema (name, logo, sameAs) to establish "
-                        "entity identity.",
-        "howto": "Add HowTo schema for step-by-step content to improve eligibility "
-                 "for AI step extraction.",
-        "article": "Add Article schema (headline, author, datePublished) for "
-                   "editorial/blog content.",
+        "faqpage": "Soru-cevap içerikleri için FAQPage şeması ekleyin — AI cevap "
+                   "motorları tarafından güçlü şekilde tercih edilir.",
+        "organization": "Varlık (entity) kimliğinizi netleştirmek için Organization "
+                        "şeması ekleyin (name, logo, sameAs).",
+        "howto": "Adım adım içerikler için HowTo şeması ekleyin; AI'nın adımları "
+                 "çıkarmasına uygunluğu artırır.",
+        "article": "Editöryel/blog içerikleri için Article şeması ekleyin "
+                   "(headline, author, datePublished).",
     }
-    return tips.get(key, "Add the relevant schema.org type.")
+    return tips.get(key, "İlgili schema.org türünü ekleyin.")

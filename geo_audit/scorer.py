@@ -62,6 +62,21 @@ def grade_for(score: float) -> str:
     return "F"
 
 
+def grade_description(score: float) -> str:
+    """Short Turkish interpretation of the overall score (for reports)."""
+    if score >= 90:
+        return "Mükemmel — site AI motorları için güçlü şekilde optimize edilmiş."
+    if score >= 80:
+        return "İyi — sağlam bir temel var, birkaç iyileştirme ile öne çıkar."
+    if score >= 70:
+        return "Orta-iyi — temel sinyaller mevcut, önemli fırsatlar var."
+    if score >= 60:
+        return "Orta — kritik eksikler GEO görünürlüğünü sınırlıyor."
+    if score >= 50:
+        return "Zayıf — AI motorlarında alıntılanma şansı düşük."
+    return "Kritik — site AI arama motorları için büyük ölçüde hazır değil."
+
+
 def score(crawl_result: "crawler_mod.CrawlResult") -> AuditReport:
     """Run all analyzers and build the aggregated AuditReport."""
     if not crawl_result.ok and not crawl_result.html:
