@@ -39,6 +39,16 @@ python main.py example.com --no-color
 python main.py example.com --quiet --json report.json
 ```
 
+### Batch mode
+
+Audit many URLs (one per line; blank lines and `#comments` ignored) and export
+a summary CSV (one row per URL, with per-category scores):
+
+```bash
+python main.py --batch urls.txt --csv summary.csv
+python main.py --batch urls.txt --json all_reports.json   # combined JSON array
+```
+
 ### Exit codes
 
 | Code | Meaning                                  |
@@ -58,7 +68,7 @@ The GEO Score is a weighted sum of six categories (100 points total):
 | 3 | **Schema Markup**                | 25     | JSON-LD / schema.org types: `FAQPage`, `Organization`, `HowTo`, `Article` |
 | 4 | **Content Structure**            | 20     | Single H1, H2 hierarchy, answer-first lead paragraph |
 | 5 | **Meta Signals**                 | 10     | `<title>`, meta description, Open Graph tags |
-| 6 | **Page Speed / Crawlability**    | 10     | HTTP 200, response time, HTTPS, compression |
+| 6 | **Page Speed / Crawlability**    | 10     | HTTP 200, response time, HTTPS, compression, sitemap.xml |
 
 ### Grades
 
@@ -77,15 +87,28 @@ The GEO Score is a weighted sum of six categories (100 points total):
 geo-audit-tool/
 ├── main.py                  # CLI entry point
 ├── requirements.txt
+├── requirements-dev.txt     # + pytest
 ├── README.md
 ├── claude.md                # Notes for AI assistants working on this repo
-└── geo_audit/
-    ├── __init__.py          # Shared data models (Finding, CategoryResult)
-    ├── crawler.py           # URL fetch, robots.txt, AI-bot access, page speed
-    ├── schema_checker.py    # JSON-LD / schema.org detection
-    ├── content_analyzer.py  # Headings, answer-first, llms.txt, meta signals
-    ├── scorer.py            # Weighted scoring + grading engine
-    └── reporter.py          # Terminal output + JSON export
+├── geo_audit/
+│   ├── __init__.py          # Shared data models (Finding, CategoryResult)
+│   ├── crawler.py           # URL fetch, robots.txt, AI-bot access, speed, sitemap
+│   ├── schema_checker.py    # JSON-LD / schema.org detection
+│   ├── content_analyzer.py  # Headings, answer-first, llms.txt, meta signals
+│   ├── scorer.py            # Weighted scoring + grading engine
+│   ├── reporter.py          # Terminal output + JSON / CSV export
+│   └── batch.py             # Multi-URL auditing
+└── tests/                   # pytest suite (pure analyzers, no network)
+```
+
+## Development & tests
+
+The analyzers are pure functions over already-fetched data, so the test suite
+runs entirely offline (no network):
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q
 ```
 
 ## Example output

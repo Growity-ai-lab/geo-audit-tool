@@ -34,8 +34,10 @@ URL → Crawler (network I/O) → CrawlResult
 - **`geo_audit/scorer.py`** — orchestrates all analyzers, sums weighted
   scores, assigns a grade. `CATEGORY_ORDER` is the source of truth for which
   categories run and in what order.
-- **`geo_audit/reporter.py`** — `print_report()` / `render_terminal()` and
-  `to_json()` / `export_json()`.
+- **`geo_audit/reporter.py`** — `print_report()` / `render_terminal()`,
+  `to_json()` / `export_json()`, and `export_csv()` (batch summary).
+- **`geo_audit/batch.py`** — `read_url_list()` and `audit_many()` for auditing
+  many URLs sequentially with a progress callback.
 
 ## Scoring weights (total = 100)
 
@@ -60,18 +62,33 @@ place to edit — `scorer` sums them dynamically, so totals stay consistent.
 - No network in tests — pass HTML strings / fake `CrawlResult`s directly to
   the analyzers.
 
+The `page_speed` category also scores **sitemap.xml** discovery (via a
+`Sitemap:` directive in robots.txt, falling back to `/sitemap.xml`). Its sub-
+weights live in `crawler.py` (`W_STATUS_OK`, `W_RESPONSE_TIME`, `W_HTTPS`,
+`W_COMPRESSION`, `W_SITEMAP`) and must still sum to `SPEED_MAX_SCORE`.
+
 ## Running
 
 ```bash
 pip install -r requirements.txt
 python main.py example.com
 python main.py example.com --json report.json
+python main.py --batch urls.txt --csv summary.csv   # batch mode
 ```
+
+## Testing
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q          # tests/ — pure analyzers, fake CrawlResults, no network
+```
+
+When adding a checker, add a test with an HTML fixture or a hand-built
+`CrawlResult`; do not make network calls from tests.
 
 ## Ideas / TODO
 
-- Add a unit-test suite (analyzers are pure → easy to test with HTML fixtures).
 - Optional real page-speed metrics (Core Web Vitals via PageSpeed Insights API).
-- Sitemap.xml discovery and validation.
-- Batch mode: audit a list of URLs and emit a CSV.
+- Sitemap.xml deep validation (fetch & validate child sitemaps, lastmod freshness).
+- Parallelize batch mode (thread pool) for large URL lists.
 - Detection of `noai` / `noimageai` meta directives.

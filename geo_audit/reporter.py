@@ -1,11 +1,12 @@
 """Reporting: human-readable terminal output and JSON export."""
 
+import csv
 import json
 import sys
-from typing import Optional
+from typing import List, Optional
 
 from . import FAIL, OK, WARN
-from .scorer import AuditReport
+from .scorer import AuditReport, CATEGORY_ORDER
 
 # ANSI colors (auto-disabled when output is not a TTY).
 _COLORS = {
@@ -128,3 +129,28 @@ def to_json(report: AuditReport, indent: int = 2) -> str:
 def export_json(report: AuditReport, path: str, indent: int = 2) -> None:
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(to_json(report, indent=indent))
+
+
+def export_csv(reports: List[AuditReport], path: str) -> None:
+    """Write a one-row-per-URL summary CSV (used by batch mode)."""
+    fieldnames = (
+        ["url", "final_url", "reachable", "geo_score", "grade"]
+        + [f"{key}_score" for key in CATEGORY_ORDER]
+        + ["error"]
+    )
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        for report in reports:
+            cat_scores = {c.key: c.score for c in report.categories}
+            row = {
+                "url": report.url,
+                "final_url": report.final_url,
+                "reachable": report.reachable,
+                "geo_score": round(report.total_score, 1),
+                "grade": report.grade,
+                "error": report.error or "",
+            }
+            for key in CATEGORY_ORDER:
+                row[f"{key}_score"] = round(cat_scores.get(key, 0.0), 1)
+            writer.writerow(row)

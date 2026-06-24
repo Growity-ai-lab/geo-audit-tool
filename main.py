@@ -12,8 +12,9 @@ import argparse
 import sys
 
 from geo_audit import __version__
+from geo_audit.batch import audit_many, read_url_list
 from geo_audit.crawler import Crawler
-from geo_audit.reporter import export_json, print_report, to_json
+from geo_audit.reporter import export_csv, export_json, print_report, to_json
 from geo_audit.scorer import score
 
 
@@ -22,7 +23,21 @@ def build_parser() -> argparse.ArgumentParser:
         prog="geo-audit",
         description="Audit a URL for GEO/AIO readiness and produce a 0-100 GEO Score.",
     )
-    parser.add_argument("url", help="URL to audit (scheme optional; https assumed).")
+    parser.add_argument(
+        "url",
+        nargs="?",
+        help="URL to audit (scheme optional; https assumed).",
+    )
+    parser.add_argument(
+        "--batch",
+        metavar="FILE",
+        help="Audit many URLs listed one-per-line in FILE (use with --csv).",
+    )
+    parser.add_argument(
+        "--csv",
+        metavar="PATH",
+        help="Export a summary CSV (one row per URL). Most useful with --batch.",
+    )
     parser.add_argument(
         "--json",
         metavar="PATH",
@@ -52,8 +67,60 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _run_batch(args) -> int:
+    urls = read_url_list(args.batch)
+    if not urls:
+        print(f"No URLs found in {args.batch}", file=sys.stderr)
+        return 2
+
+    def on_progress(i, total, report):
+        if not args.quiet:
+            status = (
+                f"{report.total_score:.0f}/100 ({report.grade})"
+                if report.reachable
+                else "unreachable"
+            )
+            print(f"[{i}/{total}] {report.url} → {status}")
+
+    reports = audit_many(urls, timeout=args.timeout, on_progress=on_progress)
+
+    if args.csv:
+        export_csv(reports, args.csv)
+        if not args.quiet:
+            print(f"CSV summary written to {args.csv}")
+    if args.json and args.json != "-":
+        # Write a combined JSON array for batch runs.
+        import json as _json
+
+        with open(args.json, "w", encoding="utf-8") as fh:
+            fh.write(
+                _json.dumps(
+                    [r.to_dict() for r in reports], indent=2, ensure_ascii=False
+                )
+            )
+        if not args.quiet:
+            print(f"JSON report written to {args.json}")
+
+    if not args.csv and not args.json and not args.quiet:
+        print(
+            "Tip: add --csv summary.csv or --json out.json to capture batch results."
+        )
+
+    reachable = [r for r in reports if r.reachable]
+    if not reachable:
+        return 2
+    return 0 if all(r.total_score >= 50 for r in reachable) else 1
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
+
+    if args.batch:
+        return _run_batch(args)
+
+    if not args.url:
+        print("error: a URL or --batch FILE is required.", file=sys.stderr)
+        return 2
 
     crawler = Crawler(timeout=args.timeout)
     crawl_result = crawler.crawl(args.url)

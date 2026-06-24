@@ -20,10 +20,11 @@ BOT_MAX_SCORE = 25.0
 SPEED_MAX_SCORE = 10.0
 
 # Page-speed sub-weights (sum == SPEED_MAX_SCORE).
-W_STATUS_OK = 3.0
-W_RESPONSE_TIME = 4.0
+W_STATUS_OK = 2.0
+W_RESPONSE_TIME = 3.0
 W_HTTPS = 1.0
 W_COMPRESSION = 2.0
+W_SITEMAP = 2.0
 
 # Response-time thresholds (milliseconds) for full / partial credit.
 FAST_MS = 800
@@ -65,6 +66,10 @@ class CrawlResult:
 
     llms_txt_found: bool = False
     llms_txt_url: str = ""
+
+    sitemap_found: bool = False
+    sitemap_url: str = ""
+    sitemap_url_count: int = 0
 
     @property
     def base_url(self) -> str:
@@ -125,6 +130,9 @@ class Crawler:
         # 3. llms.txt presence.
         self._check_llms_txt(result)
 
+        # 4. sitemap.xml discovery.
+        self._check_sitemap(result)
+
         return result
 
     # ------------------------------------------------------------------ #
@@ -177,6 +185,26 @@ class Crawler:
             result.llms_txt_url = llms_url
         else:
             result.llms_txt_found = False
+
+    def _check_sitemap(self, result: CrawlResult) -> None:
+        # Prefer a Sitemap: directive in robots.txt, else fall back to the
+        # conventional /sitemap.xml location.
+        candidates = []
+        for line in result.robots_text.splitlines():
+            if line.strip().lower().startswith("sitemap:"):
+                candidates.append(line.split(":", 1)[1].strip())
+        candidates.append(urljoin(result.base_url + "/", "sitemap.xml"))
+
+        for sitemap_url in candidates:
+            resp = self._fetch_text(sitemap_url)
+            if resp is not None and resp.status_code == 200 and resp.text.strip():
+                body = resp.text
+                if "<urlset" in body or "<sitemapindex" in body or "<url>" in body:
+                    result.sitemap_found = True
+                    result.sitemap_url = sitemap_url
+                    result.sitemap_url_count = body.count("<loc>")
+                    return
+        result.sitemap_found = False
 
 
 def analyze_bot_access(result: CrawlResult) -> CategoryResult:
@@ -284,6 +312,25 @@ def analyze_page_speed(result: CrawlResult) -> CategoryResult:
                 WARN,
                 "No content compression detected.",
                 "Enable gzip or Brotli compression to speed up delivery.",
+            )
+        )
+
+    # Sitemap.
+    if result.sitemap_found:
+        score += W_SITEMAP
+        count = (
+            f" ({result.sitemap_url_count} URLs)"
+            if result.sitemap_url_count
+            else ""
+        )
+        findings.append(Finding(OK, f"Sitemap found at {result.sitemap_url}{count}."))
+    else:
+        findings.append(
+            Finding(
+                WARN,
+                "No XML sitemap found.",
+                "Publish a sitemap.xml and reference it from robots.txt so crawlers "
+                "can discover all your pages.",
             )
         )
 
