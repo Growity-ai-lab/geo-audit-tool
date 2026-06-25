@@ -332,7 +332,7 @@ def render_html(
         priority = ""
 
     # --- Category breakdown ---------------------------------------------
-    cat_blocks = ['<section class="card"><h2><span class="h2-accent"></span>Kategori Detayları</h2></section>']
+    cat_blocks = ['<h2 class="section-title"><span class="h2-accent"></span>Kategori Detayları</h2>']
     for cat in report.categories:
         c_ratio = cat.ratio
         color = _hue(c_ratio)
@@ -442,6 +442,7 @@ def _html_shell(logo_html, brand, url, when, body) -> str:
   h2 {{ font-size:17px; margin:0 0 14px; display:flex; align-items:center; gap:10px; }}
   h3 {{ font-size:15.5px; margin:0; }}
   .h2-accent {{ width:6px; height:18px; border-radius:3px; background:var(--brand); display:inline-block; }}
+  .section-title {{ font-size:17px; margin:26px 4px 14px; display:flex; align-items:center; gap:10px; }}
 
   /* Cover */
   .cover {{ display:flex; justify-content:space-between; align-items:center; gap:24px;
