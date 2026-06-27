@@ -249,7 +249,14 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
         </div>
       )}
 
-      {result && <ResultView result={result} pdfUrl={pdfUrl} htmlUrl={htmlUrl} />}
+      {result && (
+        <ResultView
+          result={result}
+          pdfUrl={pdfUrl}
+          htmlUrl={htmlUrl}
+          requestedJs={renderJs}
+        />
+      )}
     </main>
   );
 }
@@ -258,10 +265,12 @@ function ResultView({
   result,
   pdfUrl,
   htmlUrl,
+  requestedJs,
 }: {
   result: AuditResult;
   pdfUrl: string | null;
   htmlUrl: string | null;
+  requestedJs: boolean;
 }) {
   if (!result.reachable) {
     return (
@@ -306,6 +315,11 @@ function ResultView({
           <div style={{ color: "#9fb0c7", marginTop: 4 }}>{result.final_url}</div>
           <div style={{ color: "#647892", fontSize: 13, marginTop: 2 }}>
             Render: {result.rendered_with}
+            {requestedJs && result.rendered_with !== "playwright" && (
+              <span style={{ color: "#f59e0b" }}>
+                {" "}— JS render kullanılamadı, ham HTML'e düşüldü
+              </span>
+            )}
           </div>
         </div>
       </div>
