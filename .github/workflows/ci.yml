@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+
+jobs:
+  # Guards the pure engine: the full pytest suite must stay green, including
+  # the fetcher refactor and the API wiring tests.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-api.txt pytest
+      - name: Run tests
+        run: python -m pytest -q
+
+  # Ensures the Next.js app type-checks and builds.
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  # Builds both backend images so the two-image structure (api + worker) stays
+  # valid. Runs only after the engine tests pass.
+  images:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build -f Dockerfile.api -t geo-audit-api:ci .
+      - name: Build worker image
+        run: docker build -f Dockerfile.worker -t geo-audit-worker:ci .

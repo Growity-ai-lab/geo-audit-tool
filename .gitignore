@@ -5,7 +5,16 @@ __pycache__/
 venv/
 *.json
 !package.json
+!package-lock.json
+!tsconfig.json
 .DS_Store
+
+# Node / Next.js
+node_modules/
+.next/
+
+# Runtime audit artifacts (HTML/PDF) written by the API
+data/
 
 # Generated reports
 ornek-rapor.html

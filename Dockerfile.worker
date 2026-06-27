@@ -1,0 +1,22 @@
+# Worker image (structurally ready for Phase A4).
+#
+# Carries the full engine plus Playwright browsers so it can, in A4, run the
+# Celery tasks that crawl, render PDFs, and perform JS-rendered (SPA) fetches.
+# The Celery wiring itself lands in A4; for now the image is built by CI to keep
+# the two-image structure honest and the dependencies validated.
+FROM mcr.microsoft.com/playwright/python:v1.49.1-jammy
+
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+COPY requirements.txt requirements-api.txt ./
+RUN pip install --no-cache-dir -r requirements-api.txt
+
+COPY geo_audit ./geo_audit
+COPY api ./api
+
+# Placeholder entrypoint until the Celery app exists (A4):
+#   CMD ["celery", "-A", "api.worker.celery_app", "worker", "--loglevel=info"]
+CMD ["python", "-c", "print('worker image ready; Celery wiring lands in Phase A4')"]

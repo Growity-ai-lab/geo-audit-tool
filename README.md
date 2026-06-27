@@ -89,6 +89,51 @@ python main.py --batch urls.txt --json all_reports.json   # combined JSON array
 | `1`  | Audit completed, score < 50             |
 | `2`  | Page unreachable                         |
 
+## Web uygulaması (API + arayüz)
+
+Aynı denetim motoru bir web uygulaması olarak da sunulur: ekip üyesi tarayıcıda
+bir URL girer, GEO Score'u görür ve CLI ile birebir aynı **markalı PDF/HTML
+raporu** indirir. Motor yeniden yazılmaz — FastAPI katmanı onu **import edip
+sarmalar** (`api/service.py` → `Crawler().crawl → score → render_html → PDF`).
+
+> Bu **Faz A1**: senkron `POST /audits`. Postgres/Redis/Celery sonraki fazlarda
+> (A2/A4) gelir.
+
+### Docker ile (önerilen)
+
+```bash
+docker compose up --build
+# Arayüz:  http://localhost:3000
+# API:     http://localhost:8000  (Swagger: /docs, sağlık: /healthz)
+```
+
+`http://localhost:3000` adresinde bir URL girin → GEO Score + indirilebilir
+PDF/HTML raporu.
+
+### Yerel geliştirme (Docker'sız)
+
+```bash
+# API
+pip install -r requirements-api.txt
+python -m playwright install chromium      # PDF render için (bir kez)
+uvicorn api.main:app --reload              # http://localhost:8000
+
+# Arayüz (ayrı terminal)
+cd frontend && npm install && npm run dev   # http://localhost:3000
+```
+
+### API
+
+| Method | Yol | Açıklama |
+|--------|-----|----------|
+| `POST` | `/audits` | `{ "url", "client?", "brand?", "render_js?" }` → skor + `html_url`/`pdf_url` |
+| `GET`  | `/audits/{id}/report.pdf` | Üretilen PDF raporu |
+| `GET`  | `/audits/{id}/report.html` | Üretilen HTML raporu |
+| `GET`  | `/healthz` | Sağlık kontrolü |
+
+`render_js=true` SPA siteleri için Playwright (headless Chromium) ile render
+eder; `ENABLE_JS_RENDER=true` ortam değişkeni gerektirir.
+
 ## Scoring model
 
 The GEO Score is a weighted sum of six categories (100 points total):
@@ -122,15 +167,28 @@ geo-audit-tool/
 ├── requirements-dev.txt     # + pytest
 ├── README.md
 ├── claude.md                # Notes for AI assistants working on this repo
-├── geo_audit/
+├── geo_audit/               # Pure audit engine (no web deps)
 │   ├── __init__.py          # Shared data models (Finding, CategoryResult)
-│   ├── crawler.py           # URL fetch, robots.txt, AI-bot access, speed, sitemap
+│   ├── crawler.py           # robots.txt, AI-bot access, speed, sitemap
+│   ├── fetcher.py           # Pluggable page fetch (RequestsFetcher / PlaywrightFetcher)
 │   ├── schema_checker.py    # JSON-LD / schema.org detection
 │   ├── content_analyzer.py  # Headings, answer-first, llms.txt, meta signals
 │   ├── scorer.py            # Weighted scoring + grading engine
-│   ├── reporter.py          # Terminal output + JSON / CSV export
+│   ├── reporter.py          # Terminal / HTML / JSON / CSV output
 │   └── batch.py             # Multi-URL auditing
-└── tests/                   # pytest suite (pure analyzers, no network)
+├── api/                     # FastAPI layer (wraps the engine; A1)
+│   ├── main.py              # App, CORS, /healthz
+│   ├── routes/audits.py     # POST /audits + artifact serving
+│   ├── service.py           # crawl → score → render_html → PDF
+│   ├── pdf.py               # Playwright print-to-PDF
+│   ├── schemas.py           # Pydantic request/response models
+│   ├── storage.py           # Local-disk artifact store
+│   └── config.py            # Env-driven settings
+├── frontend/                # Next.js app (URL form → score + downloads)
+├── Dockerfile.api           # API image (Playwright base, for sync PDF)
+├── Dockerfile.worker        # Worker image (A4-ready)
+├── docker-compose.yml       # api + frontend
+└── tests/                   # pytest suite (engine + fetcher + API wiring)
 ```
 
 ## Development & tests
