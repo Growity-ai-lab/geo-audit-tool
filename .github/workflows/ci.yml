@@ -17,7 +17,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install dependencies
-        run: pip install -r requirements-api.txt pytest
+        run: pip install -r requirements-test.txt
       - name: Run tests
         run: python -m pytest -q
 
