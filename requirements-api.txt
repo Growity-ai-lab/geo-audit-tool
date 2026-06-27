@@ -1,0 +1,8 @@
+-r requirements.txt
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.6.0
+python-multipart>=0.0.9
+# Pinned to match the mcr.microsoft.com/playwright/python base image so the
+# bundled browsers and the Python package stay in lockstep (no extra download).
+playwright==1.49.1

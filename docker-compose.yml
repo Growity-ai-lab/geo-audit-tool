@@ -1,0 +1,35 @@
+# A1 local stack: FastAPI (synchronous audits + PDF) + Next.js frontend.
+# Redis / Postgres / Celery worker arrive in later phases (A2, A4).
+#
+# Usage:
+#   docker compose up --build
+#   open http://localhost:3000  → enter a URL → download the branded PDF.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      - CORS_ORIGINS=http://localhost:3000
+      - ARTIFACTS_DIR=/data/artifacts
+      - ENABLE_JS_RENDER=true
+    volumes:
+      - artifacts:/data/artifacts
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      # Browser-side calls hit the API on the host's published port.
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+    depends_on:
+      - api
+
+volumes:
+  artifacts:

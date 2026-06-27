@@ -6,7 +6,6 @@ llms.txt, and evaluates whether the major generative-AI crawlers are allowed
 to access the page.
 """
 
-import time
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 from urllib.parse import urljoin, urlparse
@@ -15,6 +14,7 @@ from urllib.robotparser import RobotFileParser
 import requests
 
 from . import FAIL, OK, WARN, CategoryResult, Finding
+from .fetcher import DEFAULT_TIMEOUT, DEFAULT_UA, Fetcher, RequestsFetcher
 
 BOT_MAX_SCORE = 25.0
 SPEED_MAX_SCORE = 10.0
@@ -37,13 +37,6 @@ AI_BOTS: Dict[str, str] = {
     "ClaudeBot": "ClaudeBot",            # Anthropic
     "PerplexityBot": "PerplexityBot",    # Perplexity
 }
-
-DEFAULT_TIMEOUT = 15
-DEFAULT_UA = (
-    "Mozilla/5.0 (compatible; GEO-Audit-Tool/0.1; "
-    "+https://github.com/growity-ai-lab/geo-audit-tool)"
-)
-
 
 def _looks_like_html(text: str) -> bool:
     """True if the body is (most likely) an HTML page, e.g. a soft-404.
@@ -75,6 +68,7 @@ class CrawlResult:
     headers: Dict[str, str] = field(default_factory=dict)
     elapsed_ms: Optional[float] = None
     content_length: int = 0
+    rendered_with: str = "requests"
 
     robots_found: bool = False
     robots_text: str = ""
@@ -108,8 +102,15 @@ def normalize_url(url: str) -> str:
 class Crawler:
     """Fetches a page and its sidecar resources (robots.txt, llms.txt)."""
 
-    def __init__(self, timeout: int = DEFAULT_TIMEOUT, user_agent: str = DEFAULT_UA):
+    def __init__(
+        self,
+        timeout: int = DEFAULT_TIMEOUT,
+        user_agent: str = DEFAULT_UA,
+        fetcher: Optional[Fetcher] = None,
+    ):
         self.timeout = timeout
+        # Lightweight session reused for sidecar files (robots/llms/sitemap),
+        # which are plain text and never need JavaScript rendering.
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -118,26 +119,36 @@ class Crawler:
                 "Accept-Encoding": "gzip, deflate, br",
             }
         )
+        # Pluggable strategy for the main page fetch. Defaults to the original
+        # requests-based behaviour, sharing this session.
+        self.fetcher: Fetcher = fetcher or RequestsFetcher(
+            session=self.session, timeout=timeout
+        )
 
     def crawl(self, url: str) -> CrawlResult:
         url = normalize_url(url)
         result = CrawlResult(url=url)
 
-        # 1. Fetch the main page.
+        # 1. Fetch the main page via the configured strategy.
         try:
-            start = time.perf_counter()
-            resp = self.session.get(url, timeout=self.timeout, allow_redirects=True)
-            result.elapsed_ms = (time.perf_counter() - start) * 1000.0
+            resp = self.fetcher.fetch(url)
+            result.elapsed_ms = resp.elapsed_ms
             result.status_code = resp.status_code
-            result.final_url = resp.url
-            result.headers = {k.lower(): v for k, v in resp.headers.items()}
-            result.html = resp.text or ""
-            result.content_length = len(resp.content or b"")
+            result.final_url = resp.final_url
+            result.headers = resp.headers
+            result.html = resp.text
+            result.content_length = resp.content_length
             result.ok = resp.ok
+            result.rendered_with = resp.rendered_with
             if not resp.ok:
                 result.error = f"HTTP {resp.status_code}"
         except requests.RequestException as exc:
             result.error = f"Request failed: {exc}"
+            return result
+        except Exception as exc:  # noqa: BLE001 - browser/transport failures
+            # PlaywrightFetcher and other strategies may raise non-requests
+            # errors; surface them the same graceful way instead of crashing.
+            result.error = f"Fetch failed: {exc}"
             return result
 
         # 2. robots.txt + AI bot access.
