@@ -10,6 +10,7 @@ psycopg2-binary>=2.9.9
 # (HS256 needs no heavy crypto backend).
 bcrypt>=4.0.0
 PyJWT>=2.8.0
+celery[redis]>=5.3.0
 # Pinned to match the mcr.microsoft.com/playwright/python base image so the
 # bundled browsers and the Python package stay in lockstep (no extra download).
 playwright==1.49.1

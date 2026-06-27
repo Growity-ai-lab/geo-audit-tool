@@ -42,8 +42,9 @@ def test_login_and_run_audit(auth_client, make_user):
     resp = auth_client.post(
         "/audits", json={"url": "example.com"}, headers=_bearer(token)
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     body = resp.json()
+    assert body["status"] == "done"
     assert body["reachable"] is True
     assert body["user_id"] == me["id"]
 

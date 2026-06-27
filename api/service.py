@@ -41,14 +41,18 @@ def _build_crawler(render_js: bool) -> Crawler:
     return Crawler(timeout=settings.fetch_timeout)
 
 
-def run_audit(req: AuditRequest, client_name: str | None = None) -> AuditResponse:
-    """Run a full synchronous audit and render HTML + PDF artifacts.
+def run_audit(
+    req: AuditRequest, audit_id: str | None = None, client_name: str | None = None
+) -> AuditResponse:
+    """Run a full audit and render HTML + PDF artifacts.
 
+    ``audit_id`` is supplied by the caller (created at enqueue time so it can be
+    returned before the work runs); when omitted a fresh one is generated.
     ``client_name`` (e.g. resolved from a stored client) overrides the request's
-    ``client`` field for the report cover. Persistence is handled by the caller
-    (the route), keeping this function free of DB concerns.
+    ``client`` field for the report cover. Persistence is handled by the caller,
+    keeping this function free of DB concerns.
     """
-    audit_id = uuid.uuid4().hex
+    audit_id = audit_id or uuid.uuid4().hex
     brand = req.brand or settings.default_brand
     cover_client = client_name if client_name is not None else req.client
     started = datetime.now(timezone.utc)

@@ -96,8 +96,10 @@ bir URL girer, GEO Score'u görür ve CLI ile birebir aynı **markalı PDF/HTML
 raporu** indirir. Motor yeniden yazılmaz — FastAPI katmanı onu **import edip
 sarmalar** (`api/service.py` → `Crawler().crawl → score → render_html → PDF`).
 
-> **Faz A1–A3**: senkron `POST /audits` + Postgres'te kalıcılık (audit geçmişi,
-> clients CRUD) + **JWT auth** (giriş zorunlu). Redis/Celery sonraki fazda (A4).
+> **Faz A1–A4**: Postgres kalıcılık + JWT auth + **asenkron audit kuyruğu**
+> (Redis + Celery worker). `POST /audits` işi kuyruğa atar ve hemen döner;
+> istemci `GET /audits/{id}` ile durumu (`queued→running→done`) poll eder.
+> Broker yoksa görevler süreç-içi (eager) çalışır — Redis'siz de çalışır.
 
 ### Docker ile (önerilen)
 
@@ -107,10 +109,11 @@ docker compose up --build
 # API:     http://localhost:8000  (Swagger: /docs, sağlık: /healthz)
 ```
 
-Compose; Postgres + API + arayüzü ayağa kaldırır ve API başlarken Alembic
-migration'larını (`alembic upgrade head`) otomatik uygular.
-`http://localhost:3000` adresinde bir URL girin → GEO Score + indirilebilir
-PDF/HTML raporu (audit veritabanına kaydedilir).
+Compose; Postgres + Redis + API + **Celery worker** + arayüzü ayağa kaldırır ve
+API başlarken Alembic migration'larını (`alembic upgrade head`) otomatik uygular.
+Audit'ler kuyruğa atılır ve worker tarafından işlenir (asenkron); arayüz bitene
+kadar poll eder. `http://localhost:3000` adresinde bir URL girin → GEO Score +
+indirilebilir PDF/HTML raporu (audit veritabanına kaydedilir).
 
 ### Yerel geliştirme (Docker'sız)
 
@@ -125,6 +128,14 @@ uvicorn api.main:app --reload              # http://localhost:8000
 
 # Arayüz (ayrı terminal)
 cd frontend && npm install && npm run dev   # http://localhost:3000
+```
+
+Varsayılan olarak audit görevleri **süreç-içi (eager)** çalışır, yani yerelde
+Redis/worker gerekmez. Gerçek asenkron kuyruğu denemek için Redis çalıştırın ve:
+
+```bash
+export CELERY_TASK_ALWAYS_EAGER=false CELERY_BROKER_URL=redis://localhost:6379/0
+celery -A api.celery_app worker --loglevel=info   # ayrı terminal
 ```
 
 Veritabanı `DATABASE_URL` ile seçilir; ayarlanmazsa sıfır-konfigürasyon için
@@ -157,9 +168,9 @@ curl -X POST localhost:8000/audits -H "Authorization: Bearer <token>" \
 | `POST` | `/auth/login` | — | `username`(=email)+`password` (form) → access token |
 | `GET`  | `/auth/me` | ✓ | Mevcut kullanıcı |
 | `POST` `GET` | `/auth/users` | admin | Kullanıcı davet et / listele |
-| `POST` | `/audits` | ✓ | Audit'i kaydeder; `client_id?` ile müşteriye, çalıştıran kullanıcıya bağlar |
+| `POST` | `/audits` | ✓ | Audit'i **kuyruğa atar** (202) → `{audit_id, status}`; `client_id?` ile müşteriye, çalıştıran kullanıcıya bağlar |
 | `GET`  | `/audits` | ✓ | Audit listesi (sayfalı: `limit`, `offset`, `client_id`) |
-| `GET`  | `/audits/{id}` | ✓ | Tek audit'in tam detayı |
+| `GET`  | `/audits/{id}` | ✓ | Tek audit'in durumu/detayı (`queued`→`running`→`done`/`error`) |
 | `GET`  | `/audits/{id}/report.{pdf,html}` | — | Üretilen rapor (uuid yol = yetenek; tarayıcı indirmesi için açık) |
 | `POST` `GET` `PATCH` `DELETE` | `/clients[/{id}]` | ✓ | Müşteri CRUD'u |
 | `GET`  | `/healthz` | — | Sağlık kontrolü |
@@ -214,8 +225,10 @@ geo-audit-tool/
 ├── api/                     # FastAPI layer (wraps the engine; A1–A3)
 │   ├── main.py              # App, CORS, /healthz, admin bootstrap (lifespan)
 │   ├── auth.py              # Password hashing, JWT, get_current_user/require_admin
+│   ├── celery_app.py        # Celery instance (eager fallback if no broker)
+│   ├── tasks.py             # run_audit_task: queued → running → done/error
 │   ├── routes/auth.py       # Login, /me, admin user invites
-│   ├── routes/audits.py     # POST/GET /audits + artifact serving
+│   ├── routes/audits.py     # POST(enqueue)/GET /audits + artifact serving
 │   ├── routes/clients.py    # Clients CRUD
 │   ├── service.py           # crawl → score → render_html → PDF
 │   ├── pdf.py               # Playwright print-to-PDF

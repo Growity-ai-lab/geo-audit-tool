@@ -12,14 +12,14 @@ def test_healthz(client):
 
 def test_create_audit_returns_score_and_artifacts(client):
     resp = client.post("/audits", json={"url": "example.com", "client": "Dardanel"})
-    assert resp.status_code == 200
+    assert resp.status_code == 202  # accepted; eager mode finishes it inline
     body = resp.json()
 
+    assert body["status"] == "done"
     assert body["reachable"] is True
     assert 0 <= body["geo_score"] <= 100
     assert body["grade"] in {"A", "B", "C", "D", "E", "F"}
     assert body["rendered_with"] == "requests"
-    assert body["status"] == "done"
     assert body["html_url"] == f"/audits/{body['audit_id']}/report.html"
     assert body["pdf_url"] == f"/audits/{body['audit_id']}/report.pdf"
     assert any(c["key"] == "bot_access" for c in body["categories"])

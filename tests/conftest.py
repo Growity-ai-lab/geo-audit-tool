@@ -10,10 +10,11 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from api import auth as auth_mod
+from api import db as db_module
 from api import models, service
+from api.celery_app import celery_app
 from api.config import settings
 from api.db import Base, get_db
 from api.main import app
@@ -48,7 +49,8 @@ class _FakeFetcher:
 
 @pytest.fixture(autouse=True)
 def _deterministic_audits(tmp_path, monkeypatch):
-    """Make audits deterministic: temp artifacts, fake fetch, stubbed PDF."""
+    """Make audits deterministic: temp artifacts, fake fetch, stubbed PDF, and
+    run Celery tasks inline (eager) so no broker is needed."""
     monkeypatch.setattr(settings, "artifacts_dir", str(tmp_path))
 
     def _fake_build_crawler(render_js: bool) -> Crawler:
@@ -58,18 +60,27 @@ def _deterministic_audits(tmp_path, monkeypatch):
 
     monkeypatch.setattr(service, "_build_crawler", _fake_build_crawler)
     monkeypatch.setattr(service.pdf_mod, "html_to_pdf", lambda html: b"%PDF-1.4 fake")
+    monkeypatch.setattr(celery_app.conf, "task_always_eager", True)
 
 
 @pytest.fixture
-def db_session():
-    """Fresh in-memory SQLite shared across the test's requests."""
+def db_session(tmp_path, monkeypatch):
+    """Fresh file-backed SQLite for the test.
+
+    File-backed (not in-memory) so the request session and the eager Celery
+    task's own session — separate connections — see each other's commits.
+    SessionLocal/engine are rebound so the task (which uses db.SessionLocal)
+    hits this same database.
+    """
+    db_path = tmp_path / "test.db"
     engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+        f"sqlite:///{db_path}", connect_args={"check_same_thread": False}
     )
     Base.metadata.create_all(engine)
     TestSession = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    monkeypatch.setattr(db_module, "engine", engine)
+    monkeypatch.setattr(db_module, "SessionLocal", TestSession)
 
     def _override_get_db():
         db = TestSession()
@@ -83,7 +94,6 @@ def db_session():
         yield TestSession
     finally:
         app.dependency_overrides.pop(get_db, None)
-        Base.metadata.drop_all(engine)
         engine.dispose()
 
 

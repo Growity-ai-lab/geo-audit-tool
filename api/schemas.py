@@ -42,17 +42,21 @@ class CategorySummary(BaseModel):
 
 
 class AuditResponse(BaseModel):
-    """Result of a single audit run (also the GET /audits/{id} detail shape)."""
+    """A single audit (POST result and GET /audits/{id} detail).
+
+    Score fields are optional because an audit may still be ``queued`` or
+    ``running`` (no result yet); they are populated once ``status`` is ``done``.
+    """
 
     audit_id: str
     url: str
-    final_url: str
-    reachable: bool
+    final_url: Optional[str] = None
+    reachable: Optional[bool] = None
     error: Optional[str] = None
-    geo_score: float
-    max_score: float
-    grade: str
-    rendered_with: str
+    geo_score: Optional[float] = None
+    max_score: Optional[float] = None
+    grade: Optional[str] = None
+    rendered_with: Optional[str] = None
     categories: List[CategorySummary] = []
     # Relative artifact paths (frontend prefixes with the API base URL).
     html_url: Optional[str] = None
