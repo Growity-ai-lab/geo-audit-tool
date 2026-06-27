@@ -180,6 +180,20 @@ Tüm giriş yapan kullanıcılar tüm audit/müşterileri görür (paylaşımlı
 (`ENABLE_JS_RENDER=true` gerekir). Müşteri silinince audit geçmişi korunur
 (`client_id` NULL'a çekilir).
 
+### Gerçek Core Web Vitals (A5)
+
+`PAGESPEED_API_KEY` ayarlanırsa her audit, **Google PageSpeed Insights**'tan
+gerçek Core Web Vitals çeker (LCP, CLS, INP + Lighthouse performans skoru) ve
+`page_speed` kategorisini (10p) bunlarla puanlar — taranabilirlik sinyalleri
+yerine. Anahtar yoksa veya PSI çağrısı başarısız olursa eski taranabilirlik
+skorlaması (status/TTFB/HTTPS/sıkıştırma/sitemap) **aynen** kullanılır; toplam
+hep /100. PSI ücretsizdir (25k istek/gün).
+
+```bash
+export PAGESPEED_API_KEY=...      # Google Cloud → PageSpeed Insights API
+export PSI_STRATEGY=mobile        # veya desktop (varsayılan: mobile)
+```
+
 ## Scoring model
 
 The GEO Score is a weighted sum of six categories (100 points total):
@@ -191,7 +205,7 @@ The GEO Score is a weighted sum of six categories (100 points total):
 | 3 | **Schema Markup**                | 25     | JSON-LD / schema.org types: `FAQPage`, `Organization`, `HowTo`, `Article` |
 | 4 | **Content Structure**            | 20     | Single H1, H2 hierarchy, answer-first lead paragraph |
 | 5 | **Meta Signals**                 | 10     | `<title>`, meta description, Open Graph tags |
-| 6 | **Page Speed / Crawlability**    | 10     | HTTP 200, response time, HTTPS, compression, sitemap.xml |
+| 6 | **Page Speed / Crawlability**    | 10     | HTTP 200, response time, HTTPS, compression, sitemap.xml — or **real Core Web Vitals** (LCP/CLS/INP + Lighthouse perf) when a PageSpeed Insights key is set |
 
 ### Grades
 
@@ -217,6 +231,7 @@ geo-audit-tool/
 │   ├── __init__.py          # Shared data models (Finding, CategoryResult)
 │   ├── crawler.py           # robots.txt, AI-bot access, speed, sitemap
 │   ├── fetcher.py           # Pluggable page fetch (RequestsFetcher / PlaywrightFetcher)
+│   ├── pagespeed.py         # PageSpeed Insights client (real Core Web Vitals)
 │   ├── schema_checker.py    # JSON-LD / schema.org detection
 │   ├── content_analyzer.py  # Headings, answer-first, llms.txt, meta signals
 │   ├── scorer.py            # Weighted scoring + grading engine

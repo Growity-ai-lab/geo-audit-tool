@@ -47,6 +47,14 @@ class Settings:
         default_factory=lambda: os.environ.get("ENABLE_JS_RENDER", "false").lower()
         in ("1", "true", "yes")
     )
+    # PageSpeed Insights (A5). When a key is set, audits fetch real Core Web
+    # Vitals (LCP/CLS/INP + Lighthouse perf). Empty => crawlability-only scoring.
+    psi_api_key: str = field(
+        default_factory=lambda: os.environ.get("PAGESPEED_API_KEY", "")
+    )
+    psi_strategy: str = field(
+        default_factory=lambda: os.environ.get("PSI_STRATEGY", "mobile")
+    )
 
     # --- Auth (A3) -------------------------------------------------------- #
     # JWT signing secret. MUST be set in production; a dev fallback is used

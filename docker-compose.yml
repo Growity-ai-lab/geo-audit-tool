@@ -47,6 +47,9 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - CELERY_TASK_ALWAYS_EAGER=false
+      # Real Core Web Vitals (A5). Set PAGESPEED_API_KEY to enable.
+      - PAGESPEED_API_KEY=${PAGESPEED_API_KEY:-}
+      - PSI_STRATEGY=${PSI_STRATEGY:-mobile}
       # Auth (A3). Override these for any non-local deployment.
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-local-dev-secret-change-me-0123456789abcd}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@growity.local}
@@ -70,6 +73,8 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - CELERY_TASK_ALWAYS_EAGER=false
+      - PAGESPEED_API_KEY=${PAGESPEED_API_KEY:-}
+      - PSI_STRATEGY=${PSI_STRATEGY:-mobile}
     volumes:
       # Shared with the API so it can serve the PDFs/HTML the worker writes.
       - artifacts:/data/artifacts

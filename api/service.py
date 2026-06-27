@@ -25,20 +25,26 @@ logger = logging.getLogger("geo_audit.api")
 
 
 def _build_crawler(render_js: bool) -> Crawler:
-    """Create a Crawler, optionally with the JS-rendering fetcher.
+    """Create a Crawler with the right fetcher and optional PSI key.
 
     JS rendering is gated by ``ENABLE_JS_RENDER`` because it needs a Chromium
     install; when requested but unavailable we fall back to the default
-    requests fetcher rather than failing the whole audit.
+    requests fetcher rather than failing the whole audit. Real Core Web Vitals
+    are enabled whenever ``PAGESPEED_API_KEY`` is configured.
     """
+    psi_key = settings.psi_api_key or None
+    fetcher = None
     if render_js and settings.enable_js_render:
-        return Crawler(
-            timeout=settings.fetch_timeout,
-            fetcher=PlaywrightFetcher(timeout=settings.fetch_timeout),
-        )
-    if render_js and not settings.enable_js_render:
+        fetcher = PlaywrightFetcher(timeout=settings.fetch_timeout)
+    elif render_js and not settings.enable_js_render:
         logger.warning("render_js requested but ENABLE_JS_RENDER is off; using requests")
-    return Crawler(timeout=settings.fetch_timeout)
+
+    return Crawler(
+        timeout=settings.fetch_timeout,
+        fetcher=fetcher,
+        psi_api_key=psi_key,
+        psi_strategy=settings.psi_strategy,
+    )
 
 
 def run_audit(
