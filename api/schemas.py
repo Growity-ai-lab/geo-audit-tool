@@ -59,6 +59,7 @@ class AuditResponse(BaseModel):
     pdf_url: Optional[str] = None
     # Persistence metadata.
     client_id: Optional[str] = None
+    user_id: Optional[str] = None
     scope: str = "page"
     status: str = "done"
     created_at: Optional[datetime] = None
@@ -72,6 +73,7 @@ class AuditSummary(BaseModel):
     url: str
     final_url: Optional[str] = None
     client_id: Optional[str] = None
+    user_id: Optional[str] = None
     reachable: bool
     geo_score: Optional[float] = None
     grade: Optional[str] = None
@@ -110,6 +112,30 @@ class ClientOut(BaseModel):
     domain: Optional[str] = None
     logo_url: Optional[str] = None
     created_at: datetime
+
+
+# --- Auth / users --------------------------------------------------------- #
+
+
+class UserCreate(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=8, max_length=200)
+    role: str = Field("member", pattern="^(admin|member)$")
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    email: str
+    role: str
+    is_active: bool
+    created_at: datetime
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
 
 
 class HealthResponse(BaseModel):

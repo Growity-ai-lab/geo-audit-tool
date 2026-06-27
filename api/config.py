@@ -48,5 +48,28 @@ class Settings:
         in ("1", "true", "yes")
     )
 
+    # --- Auth (A3) -------------------------------------------------------- #
+    # JWT signing secret. MUST be set in production; a dev fallback is used
+    # locally (with a warning) so the app runs out-of-the-box.
+    jwt_secret_key: str = field(
+        default_factory=lambda: os.environ.get("JWT_SECRET_KEY", "")
+    )
+    jwt_algorithm: str = field(
+        default_factory=lambda: os.environ.get("JWT_ALGORITHM", "HS256")
+    )
+    access_token_expire_minutes: int = field(
+        default_factory=lambda: int(
+            os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "720")
+        )
+    )
+    # Optional admin bootstrapped on startup (admin-seeded model: only an admin
+    # can then invite further users).
+    admin_email: str = field(
+        default_factory=lambda: os.environ.get("ADMIN_EMAIL", "")
+    )
+    admin_password: str = field(
+        default_factory=lambda: os.environ.get("ADMIN_PASSWORD", "")
+    )
+
 
 settings = Settings()

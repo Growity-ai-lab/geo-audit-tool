@@ -1,10 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   artifactUrl,
+  AuthError,
+  clearToken,
+  fetchCurrentUser,
+  getToken,
+  login,
   runAudit,
   type AuditResult,
+  type CurrentUser,
 } from "../lib/api";
 
 const GRADE_COLORS: Record<string, string> = {
@@ -23,6 +29,97 @@ function ratioColor(ratio: number): string {
 }
 
 export default function Home() {
+  const [user, setUser] = useState<CurrentUser | null>(null);
+  const [checking, setChecking] = useState(true);
+
+  // On mount, validate any stored token.
+  useEffect(() => {
+    if (!getToken()) {
+      setChecking(false);
+      return;
+    }
+    fetchCurrentUser()
+      .then(setUser)
+      .catch(() => clearToken())
+      .finally(() => setChecking(false));
+  }, []);
+
+  function onLoggedOut() {
+    clearToken();
+    setUser(null);
+  }
+
+  if (checking) {
+    return (
+      <main style={{ maxWidth: 820, margin: "0 auto", padding: "48px 20px" }}>
+        <p style={{ color: "#9fb0c7" }}>Yükleniyor…</p>
+      </main>
+    );
+  }
+
+  if (!user) {
+    return <LoginForm onSuccess={setUser} />;
+  }
+
+  return <AuditTool user={user} onLogout={onLoggedOut} />;
+}
+
+function LoginForm({ onSuccess }: { onSuccess: (u: CurrentUser) => void }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      await login(email.trim(), password);
+      const me = await fetchCurrentUser();
+      onSuccess(me);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Giriş başarısız.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main style={{ maxWidth: 420, margin: "0 auto", padding: "72px 20px" }}>
+      <h1 style={{ fontSize: 24, marginBottom: 4 }}>GEO Audit — Giriş</h1>
+      <p style={{ color: "#9fb0c7", marginTop: 0 }}>Devam etmek için giriş yapın.</p>
+      <form onSubmit={onSubmit} style={{ ...cardStyle, display: "grid", gap: 12, marginTop: 20 }}>
+        <label style={{ display: "grid", gap: 6 }}>
+          <span>E-posta</span>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            style={inputStyle}
+          />
+        </label>
+        <label style={{ display: "grid", gap: 6 }}>
+          <span>Parola</span>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            style={inputStyle}
+          />
+        </label>
+        <button type="submit" disabled={loading} style={buttonStyle(loading)}>
+          {loading ? "Giriş yapılıyor…" : "Giriş yap"}
+        </button>
+        {error && <div style={{ color: "#fecaca" }}>{error}</div>}
+      </form>
+    </main>
+  );
+}
+
+function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void }) {
   const [url, setUrl] = useState("");
   const [client, setClient] = useState("");
   const [renderJs, setRenderJs] = useState(false);
@@ -44,6 +141,10 @@ export default function Home() {
       });
       setResult(res);
     } catch (err) {
+      if (err instanceof AuthError) {
+        onLogout();
+        return;
+      }
       setError(err instanceof Error ? err.message : "Bilinmeyen hata.");
     } finally {
       setLoading(false);
@@ -55,6 +156,19 @@ export default function Home() {
 
   return (
     <main style={{ maxWidth: 820, margin: "0 auto", padding: "48px 20px" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 8,
+        }}
+      >
+        <span style={{ color: "#9fb0c7", fontSize: 14 }}>{user.email}</span>
+        <button onClick={onLogout} style={{ ...linkButton("#334155"), border: "none", cursor: "pointer" }}>
+          Çıkış
+        </button>
+      </div>
       <h1 style={{ fontSize: 28, marginBottom: 4 }}>GEO Audit</h1>
       <p style={{ color: "#9fb0c7", marginTop: 0 }}>
         Bir URL girin; AI arama motorları için GEO/AIO hazırlık skorunu ve markalı

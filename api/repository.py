@@ -63,6 +63,7 @@ def save_audit(
     audit = models.Audit(
         id=response.audit_id,
         client_id=response.client_id,
+        user_id=response.user_id,
         url=response.url,
         final_url=response.final_url,
         scope=response.scope,

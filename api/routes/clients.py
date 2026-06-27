@@ -5,11 +5,16 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from .. import repository
+from .. import auth, repository
 from ..db import get_db
 from ..schemas import ClientCreate, ClientOut, ClientUpdate
 
-router = APIRouter(prefix="/clients", tags=["clients"])
+# All client endpoints require an authenticated user (shared-access model).
+router = APIRouter(
+    prefix="/clients",
+    tags=["clients"],
+    dependencies=[Depends(auth.get_current_user)],
+)
 
 
 @router.post("", response_model=ClientOut, status_code=status.HTTP_201_CREATED)

@@ -6,6 +6,10 @@ python-multipart>=0.0.9
 sqlalchemy>=2.0.0
 alembic>=1.13.0
 psycopg2-binary>=2.9.9
+# Auth: bcrypt directly (passlib is incompatible with bcrypt 4.x/5.x) + PyJWT
+# (HS256 needs no heavy crypto backend).
+bcrypt>=4.0.0
+PyJWT>=2.8.0
 # Pinned to match the mcr.microsoft.com/playwright/python base image so the
 # bundled browsers and the Python package stay in lockstep (no extra download).
 playwright==1.49.1
