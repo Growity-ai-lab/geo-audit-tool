@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 
 from geo_audit.crawler import Crawler
 from geo_audit.fetcher import PlaywrightFetcher
@@ -40,16 +41,23 @@ def _build_crawler(render_js: bool) -> Crawler:
     return Crawler(timeout=settings.fetch_timeout)
 
 
-def run_audit(req: AuditRequest) -> AuditResponse:
-    """Run a full synchronous audit and persist HTML + PDF artifacts."""
+def run_audit(req: AuditRequest, client_name: str | None = None) -> AuditResponse:
+    """Run a full synchronous audit and render HTML + PDF artifacts.
+
+    ``client_name`` (e.g. resolved from a stored client) overrides the request's
+    ``client`` field for the report cover. Persistence is handled by the caller
+    (the route), keeping this function free of DB concerns.
+    """
     audit_id = uuid.uuid4().hex
     brand = req.brand or settings.default_brand
+    cover_client = client_name if client_name is not None else req.client
+    started = datetime.now(timezone.utc)
 
     crawler = _build_crawler(req.render_js)
     crawl_result = crawler.crawl(req.url)
     report = score(crawl_result)
 
-    html = render_html(report, brand=brand, client=req.client)
+    html = render_html(report, brand=brand, client=cover_client)
     storage.save_html(audit_id, html)
     html_url = f"/audits/{audit_id}/report.html"
 
@@ -77,4 +85,9 @@ def run_audit(req: AuditRequest) -> AuditResponse:
         categories=data["categories"],
         html_url=html_url,
         pdf_url=pdf_url,
+        client_id=req.client_id,
+        scope="page",
+        status="done" if data["reachable"] else "error",
+        created_at=started,
+        completed_at=datetime.now(timezone.utc),
     )

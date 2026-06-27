@@ -21,6 +21,38 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
+  # Validates the Alembic migration against a real Postgres (upgrade +
+  # downgrade), catching anything the SQLite-based tests can't.
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: geo
+          POSTGRES_PASSWORD: geo
+          POSTGRES_DB: geo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U geo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://geo:geo@localhost:5432/geo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-api.txt
+      - name: Upgrade to head
+        run: alembic upgrade head
+      - name: Downgrade to base
+        run: alembic downgrade base
+
   # Ensures the Next.js app type-checks and builds.
   frontend:
     runs-on: ubuntu-latest

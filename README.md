@@ -96,8 +96,8 @@ bir URL girer, GEO Score'u görür ve CLI ile birebir aynı **markalı PDF/HTML
 raporu** indirir. Motor yeniden yazılmaz — FastAPI katmanı onu **import edip
 sarmalar** (`api/service.py` → `Crawler().crawl → score → render_html → PDF`).
 
-> Bu **Faz A1**: senkron `POST /audits`. Postgres/Redis/Celery sonraki fazlarda
-> (A2/A4) gelir.
+> **Faz A1–A2**: senkron `POST /audits` + Postgres'te kalıcılık (audit geçmişi,
+> clients CRUD). Redis/Celery sonraki fazda (A4) gelir.
 
 ### Docker ile (önerilen)
 
@@ -107,8 +107,10 @@ docker compose up --build
 # API:     http://localhost:8000  (Swagger: /docs, sağlık: /healthz)
 ```
 
+Compose; Postgres + API + arayüzü ayağa kaldırır ve API başlarken Alembic
+migration'larını (`alembic upgrade head`) otomatik uygular.
 `http://localhost:3000` adresinde bir URL girin → GEO Score + indirilebilir
-PDF/HTML raporu.
+PDF/HTML raporu (audit veritabanına kaydedilir).
 
 ### Yerel geliştirme (Docker'sız)
 
@@ -116,23 +118,32 @@ PDF/HTML raporu.
 # API
 pip install -r requirements-api.txt
 python -m playwright install chromium      # PDF render için (bir kez)
+alembic upgrade head                       # şemayı oluştur (varsayılan: yerel SQLite)
 uvicorn api.main:app --reload              # http://localhost:8000
 
 # Arayüz (ayrı terminal)
 cd frontend && npm install && npm run dev   # http://localhost:3000
 ```
 
+Veritabanı `DATABASE_URL` ile seçilir; ayarlanmazsa sıfır-konfigürasyon için
+yerel bir SQLite dosyası (`sqlite:///./data/geo_audit.db`) kullanılır. Postgres
+için: `export DATABASE_URL=postgresql://geo:geo@localhost:5432/geo`.
+
 ### API
 
 | Method | Yol | Açıklama |
 |--------|-----|----------|
-| `POST` | `/audits` | `{ "url", "client?", "brand?", "render_js?" }` → skor + `html_url`/`pdf_url` |
+| `POST` | `/audits` | `{ "url", "client?", "client_id?", "brand?", "render_js?" }` → skor + `html_url`/`pdf_url`; audit'i kaydeder |
+| `GET`  | `/audits` | Audit listesi (sayfalı: `limit`, `offset`, `client_id` filtresi) |
+| `GET`  | `/audits/{id}` | Tek audit'in tam detayı (skor + kategoriler) |
 | `GET`  | `/audits/{id}/report.pdf` | Üretilen PDF raporu |
 | `GET`  | `/audits/{id}/report.html` | Üretilen HTML raporu |
+| `POST` `GET` `PATCH` `DELETE` | `/clients[/{id}]` | Müşteri CRUD'u; audit'ler `client_id` ile bağlanır |
 | `GET`  | `/healthz` | Sağlık kontrolü |
 
 `render_js=true` SPA siteleri için Playwright (headless Chromium) ile render
-eder; `ENABLE_JS_RENDER=true` ortam değişkeni gerektirir.
+eder; `ENABLE_JS_RENDER=true` ortam değişkeni gerektirir. Bir müşteri silinince
+audit geçmişi korunur (`client_id` NULL'a çekilir).
 
 ## Scoring model
 
@@ -176,14 +187,19 @@ geo-audit-tool/
 │   ├── scorer.py            # Weighted scoring + grading engine
 │   ├── reporter.py          # Terminal / HTML / JSON / CSV output
 │   └── batch.py             # Multi-URL auditing
-├── api/                     # FastAPI layer (wraps the engine; A1)
+├── api/                     # FastAPI layer (wraps the engine; A1–A2)
 │   ├── main.py              # App, CORS, /healthz
-│   ├── routes/audits.py     # POST /audits + artifact serving
+│   ├── routes/audits.py     # POST/GET /audits + artifact serving
+│   ├── routes/clients.py    # Clients CRUD
 │   ├── service.py           # crawl → score → render_html → PDF
 │   ├── pdf.py               # Playwright print-to-PDF
+│   ├── db.py                # Engine, session, get_db dependency
+│   ├── models.py            # SQLAlchemy models (Client, Audit, AuditFinding)
+│   ├── repository.py        # Data-access helpers
 │   ├── schemas.py           # Pydantic request/response models
 │   ├── storage.py           # Local-disk artifact store
 │   └── config.py            # Env-driven settings
+├── alembic/                 # DB migrations (alembic upgrade head)
 ├── frontend/                # Next.js app (URL form → score + downloads)
 ├── Dockerfile.api           # API image (Playwright base, for sync PDF)
 ├── Dockerfile.worker        # Worker image (A4-ready)

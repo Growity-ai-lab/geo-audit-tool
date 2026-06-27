@@ -16,6 +16,13 @@ def _split_csv(value: str) -> List[str]:
 
 @dataclass
 class Settings:
+    # Database. Defaults to a local SQLite file for zero-config dev; Docker
+    # Compose and production set a Postgres URL via DATABASE_URL.
+    database_url: str = field(
+        default_factory=lambda: os.environ.get(
+            "DATABASE_URL", "sqlite:///./data/geo_audit.db"
+        )
+    )
     # Where rendered HTML/PDF artifacts are written and served from.
     artifacts_dir: str = field(
         default_factory=lambda: os.environ.get("ARTIFACTS_DIR", "data/artifacts")
