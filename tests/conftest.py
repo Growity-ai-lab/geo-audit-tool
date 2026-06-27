@@ -12,7 +12,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from api import service
+from api import auth as auth_mod
+from api import models, service
 from api.config import settings
 from api.db import Base, get_db
 from api.main import app
@@ -87,5 +88,55 @@ def db_session():
 
 
 @pytest.fixture
-def client(db_session):
+def make_user(db_session):
+    """Factory that inserts a real user (hashed password) and returns it."""
+    TestSession = db_session
+
+    def _make(email: str, password: str, role: str = "member") -> models.User:
+        s = TestSession()
+        try:
+            user = models.User(
+                email=email,
+                password_hash=auth_mod.hash_password(password),
+                role=role,
+            )
+            s.add(user)
+            s.commit()
+            s.refresh(user)
+            s.expunge(user)
+            return user
+        finally:
+            s.close()
+
+    return _make
+
+
+@pytest.fixture
+def client(db_session, make_user):
+    """Authenticated client: every request acts as a fixed member user.
+
+    Overrides get_current_user so existing endpoint tests don't each need to
+    log in; the user is real (in the DB) so audit user_id FKs are valid.
+    """
+    member = make_user("member@test.local", "password123", role="member")
+    member_id = member.id
+    TestSession = db_session
+
+    def _override_current_user():
+        s = TestSession()
+        try:
+            return s.get(models.User, member_id)
+        finally:
+            s.close()
+
+    app.dependency_overrides[auth_mod.get_current_user] = _override_current_user
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.pop(auth_mod.get_current_user, None)
+
+
+@pytest.fixture
+def auth_client(db_session):
+    """Unauthenticated client for exercising the real login/JWT flow."""
     return TestClient(app)

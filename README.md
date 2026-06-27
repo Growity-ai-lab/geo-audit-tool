@@ -96,8 +96,8 @@ bir URL girer, GEO Score'u görür ve CLI ile birebir aynı **markalı PDF/HTML
 raporu** indirir. Motor yeniden yazılmaz — FastAPI katmanı onu **import edip
 sarmalar** (`api/service.py` → `Crawler().crawl → score → render_html → PDF`).
 
-> **Faz A1–A2**: senkron `POST /audits` + Postgres'te kalıcılık (audit geçmişi,
-> clients CRUD). Redis/Celery sonraki fazda (A4) gelir.
+> **Faz A1–A3**: senkron `POST /audits` + Postgres'te kalıcılık (audit geçmişi,
+> clients CRUD) + **JWT auth** (giriş zorunlu). Redis/Celery sonraki fazda (A4).
 
 ### Docker ile (önerilen)
 
@@ -119,6 +119,8 @@ PDF/HTML raporu (audit veritabanına kaydedilir).
 pip install -r requirements-api.txt
 python -m playwright install chromium      # PDF render için (bir kez)
 alembic upgrade head                       # şemayı oluştur (varsayılan: yerel SQLite)
+export JWT_SECRET_KEY=$(python -c "import secrets;print(secrets.token_hex(32))")
+export ADMIN_EMAIL=admin@growity.local ADMIN_PASSWORD=changeme123  # ilk admin
 uvicorn api.main:app --reload              # http://localhost:8000
 
 # Arayüz (ayrı terminal)
@@ -129,21 +131,43 @@ Veritabanı `DATABASE_URL` ile seçilir; ayarlanmazsa sıfır-konfigürasyon iç
 yerel bir SQLite dosyası (`sqlite:///./data/geo_audit.db`) kullanılır. Postgres
 için: `export DATABASE_URL=postgresql://geo:geo@localhost:5432/geo`.
 
+### Kimlik doğrulama (A3)
+
+Veri endpoint'leri **giriş gerektirir** (JWT, Bearer token). Hesap modeli
+*admin-tohumlu + admin-davet*: bir bootstrap admin başlangıçta env'den oluşturulur
+(`ADMIN_EMAIL` / `ADMIN_PASSWORD`), sonra yeni kullanıcıları **yalnızca admin**
+davet eder (`POST /auth/users`). Açık self-register yoktur. Üretimde
+`JWT_SECRET_KEY` mutlaka ayarlanmalıdır.
+
+```bash
+# Token al (form-encoded OAuth2 password flow)
+curl -X POST localhost:8000/auth/login \
+  -d "username=admin@growity.local&password=changeme123"
+# → {"access_token":"...","token_type":"bearer"}
+
+# Korumalı çağrı
+curl -X POST localhost:8000/audits -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" -d '{"url":"dardanel.com.tr"}'
+```
+
 ### API
 
-| Method | Yol | Açıklama |
-|--------|-----|----------|
-| `POST` | `/audits` | `{ "url", "client?", "client_id?", "brand?", "render_js?" }` → skor + `html_url`/`pdf_url`; audit'i kaydeder |
-| `GET`  | `/audits` | Audit listesi (sayfalı: `limit`, `offset`, `client_id` filtresi) |
-| `GET`  | `/audits/{id}` | Tek audit'in tam detayı (skor + kategoriler) |
-| `GET`  | `/audits/{id}/report.pdf` | Üretilen PDF raporu |
-| `GET`  | `/audits/{id}/report.html` | Üretilen HTML raporu |
-| `POST` `GET` `PATCH` `DELETE` | `/clients[/{id}]` | Müşteri CRUD'u; audit'ler `client_id` ile bağlanır |
-| `GET`  | `/healthz` | Sağlık kontrolü |
+| Method | Yol | Auth | Açıklama |
+|--------|-----|------|----------|
+| `POST` | `/auth/login` | — | `username`(=email)+`password` (form) → access token |
+| `GET`  | `/auth/me` | ✓ | Mevcut kullanıcı |
+| `POST` `GET` | `/auth/users` | admin | Kullanıcı davet et / listele |
+| `POST` | `/audits` | ✓ | Audit'i kaydeder; `client_id?` ile müşteriye, çalıştıran kullanıcıya bağlar |
+| `GET`  | `/audits` | ✓ | Audit listesi (sayfalı: `limit`, `offset`, `client_id`) |
+| `GET`  | `/audits/{id}` | ✓ | Tek audit'in tam detayı |
+| `GET`  | `/audits/{id}/report.{pdf,html}` | — | Üretilen rapor (uuid yol = yetenek; tarayıcı indirmesi için açık) |
+| `POST` `GET` `PATCH` `DELETE` | `/clients[/{id}]` | ✓ | Müşteri CRUD'u |
+| `GET`  | `/healthz` | — | Sağlık kontrolü |
 
-`render_js=true` SPA siteleri için Playwright (headless Chromium) ile render
-eder; `ENABLE_JS_RENDER=true` ortam değişkeni gerektirir. Bir müşteri silinince
-audit geçmişi korunur (`client_id` NULL'a çekilir).
+Tüm giriş yapan kullanıcılar tüm audit/müşterileri görür (paylaşımlı erişim).
+`render_js=true` SPA siteleri için Playwright ile render eder
+(`ENABLE_JS_RENDER=true` gerekir). Müşteri silinince audit geçmişi korunur
+(`client_id` NULL'a çekilir).
 
 ## Scoring model
 
@@ -187,14 +211,16 @@ geo-audit-tool/
 │   ├── scorer.py            # Weighted scoring + grading engine
 │   ├── reporter.py          # Terminal / HTML / JSON / CSV output
 │   └── batch.py             # Multi-URL auditing
-├── api/                     # FastAPI layer (wraps the engine; A1–A2)
-│   ├── main.py              # App, CORS, /healthz
+├── api/                     # FastAPI layer (wraps the engine; A1–A3)
+│   ├── main.py              # App, CORS, /healthz, admin bootstrap (lifespan)
+│   ├── auth.py              # Password hashing, JWT, get_current_user/require_admin
+│   ├── routes/auth.py       # Login, /me, admin user invites
 │   ├── routes/audits.py     # POST/GET /audits + artifact serving
 │   ├── routes/clients.py    # Clients CRUD
 │   ├── service.py           # crawl → score → render_html → PDF
 │   ├── pdf.py               # Playwright print-to-PDF
 │   ├── db.py                # Engine, session, get_db dependency
-│   ├── models.py            # SQLAlchemy models (Client, Audit, AuditFinding)
+│   ├── models.py            # SQLAlchemy models (User, Client, Audit, AuditFinding)
 │   ├── repository.py        # Data-access helpers
 │   ├── schemas.py           # Pydantic request/response models
 │   ├── storage.py           # Local-disk artifact store

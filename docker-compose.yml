@@ -34,6 +34,10 @@ services:
       - CORS_ORIGINS=http://localhost:3000
       - ARTIFACTS_DIR=/data/artifacts
       - ENABLE_JS_RENDER=true
+      # Auth (A3). Override these for any non-local deployment.
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-local-dev-secret-change-me-0123456789abcd}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@growity.local}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme123}
     volumes:
       - artifacts:/data/artifacts
     depends_on:

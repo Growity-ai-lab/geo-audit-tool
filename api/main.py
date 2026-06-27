@@ -9,22 +9,38 @@ Run locally:
 """
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from geo_audit import __version__
 
+from .auth import ensure_admin
 from .config import settings
-from .routes import audits, clients
+from .db import SessionLocal
+from .routes import audits, auth, clients
 from .schemas import HealthResponse
 
 logging.basicConfig(level=logging.INFO)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Bootstrap the admin from env (idempotent) once the schema exists.
+    db = SessionLocal()
+    try:
+        ensure_admin(db)
+    finally:
+        db.close()
+    yield
+
 
 app = FastAPI(
     title="GEO Audit API",
     version=__version__,
     description="Audit a URL for GEO/AIO readiness and download a branded report.",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -35,6 +51,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(audits.router)
 app.include_router(clients.router)
 

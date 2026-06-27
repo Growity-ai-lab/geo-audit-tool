@@ -7,6 +7,66 @@
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
+const TOKEN_KEY = "geo_audit_token";
+
+// --- Token storage -------------------------------------------------------- //
+
+export function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(TOKEN_KEY);
+}
+
+function setToken(token: string): void {
+  if (typeof window !== "undefined") window.localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearToken(): void {
+  if (typeof window !== "undefined") window.localStorage.removeItem(TOKEN_KEY);
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+/** Raised when a request fails because the user is not (or no longer) authed. */
+export class AuthError extends Error {}
+
+export interface CurrentUser {
+  id: string;
+  email: string;
+  role: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+/** Log in via the OAuth2 password flow (form-encoded) and store the token. */
+export async function login(email: string, password: string): Promise<void> {
+  const body = new URLSearchParams({ username: email, password });
+  const res = await fetch(`${API_BASE_URL}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  if (!res.ok) {
+    throw new AuthError(
+      res.status === 401 ? "E-posta veya parola hatalı." : `Giriş başarısız (HTTP ${res.status}).`,
+    );
+  }
+  const data = await res.json();
+  setToken(data.access_token);
+}
+
+export async function fetchCurrentUser(): Promise<CurrentUser> {
+  const res = await fetch(`${API_BASE_URL}/auth/me`, { headers: authHeaders() });
+  if (res.status === 401) {
+    clearToken();
+    throw new AuthError("Oturum süresi doldu.");
+  }
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as CurrentUser;
+}
+
 export interface AuditFinding {
   severity: "ok" | "warn" | "fail";
   message: string;
@@ -46,10 +106,14 @@ export interface AuditInput {
 export async function runAudit(input: AuditInput): Promise<AuditResult> {
   const res = await fetch(`${API_BASE_URL}/audits`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(input),
   });
 
+  if (res.status === 401) {
+    clearToken();
+    throw new AuthError("Oturum süresi doldu. Lütfen tekrar giriş yapın.");
+  }
   if (!res.ok) {
     let detail = `İstek başarısız (HTTP ${res.status}).`;
     try {

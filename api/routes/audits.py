@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from .. import repository, service, storage
+from .. import auth, models, repository, service, storage
 from ..db import get_db
 from ..schemas import (
     AuditListResponse,
@@ -28,7 +28,11 @@ _MEDIA_TYPES = {
 # API for PDF) block, so Starlette runs this in a worker thread, keeping the
 # event loop free and avoiding the asyncio/sync-Playwright conflict.
 @router.post("/audits", response_model=AuditResponse)
-def create_audit(req: AuditRequest, db: Session = Depends(get_db)) -> AuditResponse:
+def create_audit(
+    req: AuditRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+) -> AuditResponse:
     if not req.url or not req.url.strip():
         raise HTTPException(status_code=422, detail="url is required")
 
@@ -41,6 +45,7 @@ def create_audit(req: AuditRequest, db: Session = Depends(get_db)) -> AuditRespo
         client_name = client.name
 
     response = service.run_audit(req, client_name=client_name)
+    response.user_id = current_user.id
     repository.save_audit(db, response, render_js=req.render_js)
     return response
 
@@ -48,6 +53,7 @@ def create_audit(req: AuditRequest, db: Session = Depends(get_db)) -> AuditRespo
 @router.get("/audits", response_model=AuditListResponse)
 def list_audits(
     db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     client_id: Optional[str] = Query(None),
@@ -61,6 +67,7 @@ def list_audits(
             url=a.url,
             final_url=a.final_url,
             client_id=a.client_id,
+            user_id=a.user_id,
             reachable=a.reachable,
             geo_score=a.geo_score,
             grade=a.grade,
@@ -74,7 +81,11 @@ def list_audits(
 
 
 @router.get("/audits/{audit_id}", response_model=AuditResponse)
-def get_audit(audit_id: str, db: Session = Depends(get_db)) -> AuditResponse:
+def get_audit(
+    audit_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+) -> AuditResponse:
     audit = repository.get_audit(db, audit_id)
     if audit is None or not audit.report_json:
         raise HTTPException(status_code=404, detail="audit not found")

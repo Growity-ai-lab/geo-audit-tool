@@ -34,6 +34,21 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class User(Base):
+    """A team member who can log in and run audits."""
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    email: Mapped[str] = mapped_column(
+        String(255), unique=True, nullable=False, index=True
+    )
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), default="member", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+
 class Client(Base):
     """An agency client whose sites get audited."""
 
@@ -59,6 +74,13 @@ class Audit(Base):
     client_id: Mapped[Optional[str]] = mapped_column(
         String(32),
         ForeignKey("clients.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # Who ran the audit (shared-access model: recorded, not used for isolation).
+    user_id: Mapped[Optional[str]] = mapped_column(
+        String(32),
+        ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
