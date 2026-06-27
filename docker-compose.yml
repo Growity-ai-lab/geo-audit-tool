@@ -1,5 +1,6 @@
-# A2 local stack: Postgres + FastAPI (synchronous audits + PDF) + Next.js.
-# Redis / Celery worker arrive in later phases (A4).
+# A4 local stack: Postgres + Redis + FastAPI + Celery worker + Next.js.
+# Audits are enqueued by the API and processed by the worker (async); the
+# frontend polls until each audit is done.
 #
 # Usage:
 #   docker compose up --build
@@ -20,6 +21,14 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   api:
     build:
       context: .
@@ -34,6 +43,13 @@ services:
       - CORS_ORIGINS=http://localhost:3000
       - ARTIFACTS_DIR=/data/artifacts
       - ENABLE_JS_RENDER=true
+      # Queue (A4): enqueue to Redis; the worker processes audits.
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_TASK_ALWAYS_EAGER=false
+      # Real Core Web Vitals (A5). Set PAGESPEED_API_KEY to enable.
+      - PAGESPEED_API_KEY=${PAGESPEED_API_KEY:-}
+      - PSI_STRATEGY=${PSI_STRATEGY:-mobile}
       # Auth (A3). Override these for any non-local deployment.
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-local-dev-secret-change-me-0123456789abcd}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@growity.local}
@@ -42,6 +58,30 @@ services:
       - artifacts:/data/artifacts
     depends_on:
       db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - DATABASE_URL=postgresql://geo:geo@db:5432/geo
+      - ARTIFACTS_DIR=/data/artifacts
+      - ENABLE_JS_RENDER=true
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_TASK_ALWAYS_EAGER=false
+      - PAGESPEED_API_KEY=${PAGESPEED_API_KEY:-}
+      - PSI_STRATEGY=${PSI_STRATEGY:-mobile}
+    volumes:
+      # Shared with the API so it can serve the PDFs/HTML the worker writes.
+      - artifacts:/data/artifacts
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   frontend:

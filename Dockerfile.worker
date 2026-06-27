@@ -1,9 +1,7 @@
-# Worker image (structurally ready for Phase A4).
+# Worker image: runs the Celery worker that processes audits.
 #
-# Carries the full engine plus Playwright browsers so it can, in A4, run the
-# Celery tasks that crawl, render PDFs, and perform JS-rendered (SPA) fetches.
-# The Celery wiring itself lands in A4; for now the image is built by CI to keep
-# the two-image structure honest and the dependencies validated.
+# Built on the Playwright Python image so it can crawl JS-rendered (SPA) pages
+# and render report PDFs with headless Chromium.
 FROM mcr.microsoft.com/playwright/python:v1.49.1-jammy
 
 WORKDIR /app
@@ -19,6 +17,4 @@ COPY api ./api
 COPY alembic.ini ./
 COPY alembic ./alembic
 
-# Placeholder entrypoint until the Celery app exists (A4):
-#   CMD ["celery", "-A", "api.worker.celery_app", "worker", "--loglevel=info"]
-CMD ["python", "-c", "print('worker image ready; Celery wiring lands in Phase A4')"]
+CMD ["celery", "-A", "api.celery_app", "worker", "--loglevel=info", "--concurrency=2"]

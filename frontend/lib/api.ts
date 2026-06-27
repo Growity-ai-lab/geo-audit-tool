@@ -82,19 +82,22 @@ export interface AuditCategory {
   findings: AuditFinding[];
 }
 
+export type AuditStatus = "queued" | "running" | "done" | "error";
+
 export interface AuditResult {
   audit_id: string;
   url: string;
-  final_url: string;
-  reachable: boolean;
+  final_url: string | null;
+  reachable: boolean | null;
   error: string | null;
-  geo_score: number;
-  max_score: number;
-  grade: string;
-  rendered_with: string;
+  geo_score: number | null;
+  max_score: number | null;
+  grade: string | null;
+  rendered_with: string | null;
   categories: AuditCategory[];
   html_url: string | null;
   pdf_url: string | null;
+  status: AuditStatus;
 }
 
 export interface AuditInput {
@@ -103,7 +106,33 @@ export interface AuditInput {
   render_js?: boolean;
 }
 
-export async function runAudit(input: AuditInput): Promise<AuditResult> {
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const POLL_INTERVAL_MS = 1500;
+const POLL_MAX_ATTEMPTS = 120; // ~3 minutes
+
+/** Fetch a single audit's current state. */
+export async function getAudit(auditId: string): Promise<AuditResult> {
+  const res = await fetch(`${API_BASE_URL}/audits/${auditId}`, {
+    headers: authHeaders(),
+  });
+  if (res.status === 401) {
+    clearToken();
+    throw new AuthError("Oturum süresi doldu. Lütfen tekrar giriş yapın.");
+  }
+  if (!res.ok) throw new Error(`Audit alınamadı (HTTP ${res.status}).`);
+  return (await res.json()) as AuditResult;
+}
+
+/**
+ * Enqueue an audit and poll until it reaches a terminal status.
+ *
+ * `onStatus` (optional) reports queued/running transitions for the UI. With the
+ * eager backend the POST already returns "done"; with a real worker we poll.
+ */
+export async function runAudit(
+  input: AuditInput,
+  onStatus?: (status: AuditStatus) => void,
+): Promise<AuditResult> {
   const res = await fetch(`${API_BASE_URL}/audits`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -125,7 +154,19 @@ export async function runAudit(input: AuditInput): Promise<AuditResult> {
     throw new Error(detail);
   }
 
-  return (await res.json()) as AuditResult;
+  let result = (await res.json()) as AuditResult;
+  let attempts = 0;
+  while (
+    result.status !== "done" &&
+    result.status !== "error" &&
+    attempts < POLL_MAX_ATTEMPTS
+  ) {
+    onStatus?.(result.status);
+    await sleep(POLL_INTERVAL_MS);
+    result = await getAudit(result.audit_id);
+    attempts += 1;
+  }
+  return result;
 }
 
 // Resolve a relative artifact path (e.g. /audits/<id>/report.pdf) to a full URL.

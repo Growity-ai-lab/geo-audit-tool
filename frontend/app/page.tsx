@@ -124,6 +124,7 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
   const [client, setClient] = useState("");
   const [renderJs, setRenderJs] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [statusText, setStatusText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AuditResult | null>(null);
 
@@ -131,15 +132,23 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
     e.preventDefault();
     if (!url.trim()) return;
     setLoading(true);
+    setStatusText(null);
     setError(null);
     setResult(null);
     try {
-      const res = await runAudit({
-        url: url.trim(),
-        client: client.trim() || undefined,
-        render_js: renderJs,
-      });
-      setResult(res);
+      const res = await runAudit(
+        {
+          url: url.trim(),
+          client: client.trim() || undefined,
+          render_js: renderJs,
+        },
+        (s) => setStatusText(s === "queued" ? "Kuyrukta…" : "Çalışıyor…"),
+      );
+      if (res.status === "error") {
+        setError(res.error || "Denetim başarısız oldu.");
+      } else {
+        setResult(res);
+      }
     } catch (err) {
       if (err instanceof AuthError) {
         onLogout();
@@ -148,6 +157,7 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
       setError(err instanceof Error ? err.message : "Bilinmeyen hata.");
     } finally {
       setLoading(false);
+      setStatusText(null);
     }
   }
 
@@ -220,7 +230,7 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
         </label>
 
         <button type="submit" disabled={loading} style={buttonStyle(loading)}>
-          {loading ? "Denetleniyor…" : "Denetle"}
+          {loading ? statusText ?? "Denetleniyor…" : "Denetle"}
         </button>
       </form>
 
@@ -262,7 +272,8 @@ function ResultView({
     );
   }
 
-  const gradeColor = GRADE_COLORS[result.grade] ?? "#9fb0c7";
+  const gradeColor = GRADE_COLORS[result.grade ?? ""] ?? "#9fb0c7";
+  const score = Math.round(result.geo_score ?? 0);
 
   return (
     <div style={{ marginTop: 24, display: "grid", gap: 16 }}>
@@ -285,13 +296,11 @@ function ResultView({
             flexShrink: 0,
           }}
         >
-          <span style={{ fontSize: 30, fontWeight: 700 }}>
-            {Math.round(result.geo_score)}
-          </span>
+          <span style={{ fontSize: 30, fontWeight: 700 }}>{score}</span>
         </div>
         <div>
           <div style={{ fontSize: 20, fontWeight: 700 }}>
-            GEO Score: {Math.round(result.geo_score)}/100{" "}
+            GEO Score: {score}/100{" "}
             <span style={{ color: gradeColor }}>({result.grade})</span>
           </div>
           <div style={{ color: "#9fb0c7", marginTop: 4 }}>{result.final_url}</div>

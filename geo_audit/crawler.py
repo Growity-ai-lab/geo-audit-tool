@@ -30,6 +30,23 @@ W_SITEMAP = 2.0
 FAST_MS = 800
 SLOW_MS = 2500
 
+# Core Web Vitals thresholds (Google: good / needs-improvement boundaries).
+LCP_GOOD_MS = 2500
+LCP_NI_MS = 4000
+CLS_GOOD = 0.1
+CLS_NI = 0.25
+INP_GOOD_MS = 200
+INP_NI_MS = 500
+
+# Page-speed sub-weights in PSI mode (sum == SPEED_MAX_SCORE). Crawlability
+# anchors stay (status/https/sitemap) but most weight moves to real CWV.
+PW_STATUS = 1.0
+PW_HTTPS = 1.0
+PW_SITEMAP = 1.0
+PW_LCP = 3.0
+PW_CLS = 2.0
+PW_PERF = 2.0
+
 # Generative-AI crawlers we care about for GEO. The values are example
 # user-agent strings used when probing robots.txt rules.
 AI_BOTS: Dict[str, str] = {
@@ -81,6 +98,23 @@ class CrawlResult:
     sitemap_url: str = ""
     sitemap_url_count: int = 0
 
+    # Real Core Web Vitals from PageSpeed Insights (A5), populated only when a
+    # PSI API key is configured. None => fall back to crawlability-only scoring.
+    psi_lcp_ms: Optional[float] = None
+    psi_cls: Optional[float] = None
+    psi_inp_ms: Optional[float] = None
+    psi_perf_score: Optional[float] = None
+    psi_source: Optional[str] = None
+
+    @property
+    def has_psi(self) -> bool:
+        """True when real CWV data is available for scoring."""
+        return self.psi_source == "psi" and (
+            self.psi_perf_score is not None
+            or self.psi_lcp_ms is not None
+            or self.psi_cls is not None
+        )
+
     @property
     def base_url(self) -> str:
         parts = urlparse(self.final_url or self.url)
@@ -107,8 +141,12 @@ class Crawler:
         timeout: int = DEFAULT_TIMEOUT,
         user_agent: str = DEFAULT_UA,
         fetcher: Optional[Fetcher] = None,
+        psi_api_key: Optional[str] = None,
+        psi_strategy: str = "mobile",
     ):
         self.timeout = timeout
+        self.psi_api_key = psi_api_key
+        self.psi_strategy = psi_strategy
         # Lightweight session reused for sidecar files (robots/llms/sitemap),
         # which are plain text and never need JavaScript rendering.
         self.session = requests.Session()
@@ -160,7 +198,29 @@ class Crawler:
         # 4. sitemap.xml discovery.
         self._check_sitemap(result)
 
+        # 5. Real Core Web Vitals (optional; only when a PSI key is set).
+        if self.psi_api_key:
+            self._fetch_psi(result)
+
         return result
+
+    def _fetch_psi(self, result: CrawlResult) -> None:
+        """Populate real CWV from PageSpeed Insights (graceful on failure)."""
+        from .pagespeed import fetch_psi
+
+        psi = fetch_psi(
+            result.final_url or result.url,
+            self.psi_api_key,
+            strategy=self.psi_strategy,
+            timeout=max(self.timeout, 30),
+        )
+        if psi is None:
+            return
+        result.psi_lcp_ms = psi.lcp_ms
+        result.psi_cls = psi.cls
+        result.psi_inp_ms = psi.inp_ms
+        result.psi_perf_score = psi.perf_score
+        result.psi_source = "psi"
 
     # ------------------------------------------------------------------ #
 
@@ -284,7 +344,15 @@ def analyze_bot_access(result: CrawlResult) -> CategoryResult:
 
 
 def analyze_page_speed(result: CrawlResult) -> CategoryResult:
-    """Score basic crawlability signals from the HTTP response."""
+    """Score the page-speed category.
+
+    With real Core Web Vitals (a PSI key configured) the score is CWV-driven;
+    otherwise it falls back to the original crawlability-only signals so the
+    behaviour — and the existing tests — are unchanged.
+    """
+    if result.has_psi:
+        return _analyze_page_speed_psi(result)
+
     findings = []
     score = 0.0
 
@@ -375,4 +443,130 @@ def analyze_page_speed(result: CrawlResult) -> CategoryResult:
         score=min(SPEED_MAX_SCORE, score),
         max_score=SPEED_MAX_SCORE,
         findings=findings,
+    )
+
+
+def _analyze_page_speed_psi(result: CrawlResult) -> CategoryResult:
+    """Score page speed from real Core Web Vitals (PageSpeed Insights)."""
+    findings = []
+    score = 0.0
+
+    # Crawlability anchors (kept, reduced weight).
+    if result.status_code == 200:
+        score += PW_STATUS
+        findings.append(Finding(OK, "Sayfa HTTP 200 OK yanıtı veriyor."))
+    else:
+        findings.append(
+            Finding(
+                FAIL,
+                f"Sayfa HTTP {result.status_code} yanıtı verdi.",
+                "Kanonik URL'nin tarayıcılara 200 yanıtı verdiğinden emin olun.",
+            )
+        )
+
+    if result.is_https:
+        score += PW_HTTPS
+        findings.append(Finding(OK, "HTTPS üzerinden sunuluyor."))
+    else:
+        findings.append(
+            Finding(FAIL, "HTTPS üzerinden sunulmuyor.", "Siteyi HTTPS üzerinden sunun.")
+        )
+
+    if result.sitemap_found:
+        score += PW_SITEMAP
+        findings.append(Finding(OK, f"Sitemap bulundu: {result.sitemap_url}."))
+    else:
+        findings.append(
+            Finding(
+                WARN,
+                "XML sitemap bulunamadı.",
+                "Bir sitemap.xml yayınlayın ve robots.txt'den referans verin.",
+            )
+        )
+
+    # Largest Contentful Paint.
+    lcp = result.psi_lcp_ms
+    if lcp is not None:
+        secs = lcp / 1000.0
+        if lcp <= LCP_GOOD_MS:
+            score += PW_LCP
+            findings.append(Finding(OK, f"İyi LCP: {secs:.1f} sn (gerçek ölçüm)."))
+        elif lcp <= LCP_NI_MS:
+            score += PW_LCP / 2
+            findings.append(
+                Finding(
+                    WARN,
+                    f"Geliştirilebilir LCP: {secs:.1f} sn.",
+                    "En büyük içerik ögesini hızlandırın (görsel optimizasyonu, "
+                    "kritik CSS, sunucu yanıtı) — hedef < 2,5 sn.",
+                )
+            )
+        else:
+            findings.append(
+                Finding(
+                    FAIL,
+                    f"Zayıf LCP: {secs:.1f} sn.",
+                    "LCP'yi < 2,5 sn'ye indirin; yavaş yükleme AI/araması "
+                    "deneyimini ve sıralamayı olumsuz etkiler.",
+                )
+            )
+
+    # Cumulative Layout Shift.
+    cls = result.psi_cls
+    if cls is not None:
+        if cls <= CLS_GOOD:
+            score += PW_CLS
+            findings.append(Finding(OK, f"İyi CLS: {cls:.2f} (düzen kaymıyor)."))
+        elif cls <= CLS_NI:
+            score += PW_CLS / 2
+            findings.append(
+                Finding(
+                    WARN,
+                    f"Geliştirilebilir CLS: {cls:.2f}.",
+                    "Görsel/iframe boyutlarını sabitleyin, font yüklemesini "
+                    "stabilize edin — hedef < 0,1.",
+                )
+            )
+        else:
+            findings.append(
+                Finding(
+                    FAIL,
+                    f"Zayıf CLS: {cls:.2f}.",
+                    "Beklenmedik düzen kaymalarını giderin (boyutsuz medya, geç "
+                    "yüklenen içerik) — hedef < 0,1.",
+                )
+            )
+
+    # Lighthouse performance score (continuous contribution).
+    perf = result.psi_perf_score
+    if perf is not None:
+        score += PW_PERF * (perf / 100.0)
+        sev = OK if perf >= 90 else WARN if perf >= 50 else FAIL
+        findings.append(
+            Finding(sev, f"Lighthouse performans skoru: {perf:.0f}/100.")
+        )
+
+    # Interaction to Next Paint — reported only (field data, not always present).
+    inp = result.psi_inp_ms
+    if inp is not None:
+        sev = OK if inp <= INP_GOOD_MS else WARN if inp <= INP_NI_MS else FAIL
+        findings.append(
+            Finding(sev, f"INP: {inp:.0f} ms (gerçek kullanıcı etkileşimi).")
+        )
+
+    metrics = {
+        "lcp_ms": lcp,
+        "cls": cls,
+        "inp_ms": inp,
+        "perf_score": perf,
+        "source": "psi",
+    }
+
+    return CategoryResult(
+        key="page_speed",
+        name="Sayfa Hızı / Core Web Vitals",
+        score=min(SPEED_MAX_SCORE, score),
+        max_score=SPEED_MAX_SCORE,
+        findings=findings,
+        metrics=metrics,
     )

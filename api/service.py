@@ -25,30 +25,40 @@ logger = logging.getLogger("geo_audit.api")
 
 
 def _build_crawler(render_js: bool) -> Crawler:
-    """Create a Crawler, optionally with the JS-rendering fetcher.
+    """Create a Crawler with the right fetcher and optional PSI key.
 
     JS rendering is gated by ``ENABLE_JS_RENDER`` because it needs a Chromium
     install; when requested but unavailable we fall back to the default
-    requests fetcher rather than failing the whole audit.
+    requests fetcher rather than failing the whole audit. Real Core Web Vitals
+    are enabled whenever ``PAGESPEED_API_KEY`` is configured.
     """
+    psi_key = settings.psi_api_key or None
+    fetcher = None
     if render_js and settings.enable_js_render:
-        return Crawler(
-            timeout=settings.fetch_timeout,
-            fetcher=PlaywrightFetcher(timeout=settings.fetch_timeout),
-        )
-    if render_js and not settings.enable_js_render:
+        fetcher = PlaywrightFetcher(timeout=settings.fetch_timeout)
+    elif render_js and not settings.enable_js_render:
         logger.warning("render_js requested but ENABLE_JS_RENDER is off; using requests")
-    return Crawler(timeout=settings.fetch_timeout)
+
+    return Crawler(
+        timeout=settings.fetch_timeout,
+        fetcher=fetcher,
+        psi_api_key=psi_key,
+        psi_strategy=settings.psi_strategy,
+    )
 
 
-def run_audit(req: AuditRequest, client_name: str | None = None) -> AuditResponse:
-    """Run a full synchronous audit and render HTML + PDF artifacts.
+def run_audit(
+    req: AuditRequest, audit_id: str | None = None, client_name: str | None = None
+) -> AuditResponse:
+    """Run a full audit and render HTML + PDF artifacts.
 
+    ``audit_id`` is supplied by the caller (created at enqueue time so it can be
+    returned before the work runs); when omitted a fresh one is generated.
     ``client_name`` (e.g. resolved from a stored client) overrides the request's
-    ``client`` field for the report cover. Persistence is handled by the caller
-    (the route), keeping this function free of DB concerns.
+    ``client`` field for the report cover. Persistence is handled by the caller,
+    keeping this function free of DB concerns.
     """
-    audit_id = uuid.uuid4().hex
+    audit_id = audit_id or uuid.uuid4().hex
     brand = req.brand or settings.default_brand
     cover_client = client_name if client_name is not None else req.client
     started = datetime.now(timezone.utc)

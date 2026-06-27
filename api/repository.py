@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from . import models
-from .schemas import AuditResponse, ClientCreate, ClientUpdate
+from .schemas import AuditRequest, AuditResponse, ClientCreate, ClientUpdate
 
 
 # --- Clients -------------------------------------------------------------- #
@@ -56,31 +56,43 @@ def delete_client(db: Session, client: models.Client) -> None:
 # --- Audits --------------------------------------------------------------- #
 
 
-def save_audit(
-    db: Session, response: AuditResponse, *, render_js: bool
+def create_queued_audit(
+    db: Session, *, audit_id: str, req: AuditRequest, user_id: Optional[str]
 ) -> models.Audit:
-    """Persist a completed audit plus its flattened findings."""
+    """Create a placeholder audit row in 'queued' state before processing."""
     audit = models.Audit(
-        id=response.audit_id,
-        client_id=response.client_id,
-        user_id=response.user_id,
-        url=response.url,
-        final_url=response.final_url,
-        scope=response.scope,
-        status=response.status,
-        render_js=render_js,
-        rendered_with=response.rendered_with,
-        reachable=response.reachable,
-        geo_score=response.geo_score,
-        grade=response.grade,
-        error=response.error,
-        report_json=response.model_dump(mode="json"),
-        html_url=response.html_url,
-        pdf_url=response.pdf_url,
-        created_at=response.created_at,
-        completed_at=response.completed_at,
+        id=audit_id,
+        client_id=req.client_id,
+        user_id=user_id,
+        url=req.url,
+        scope="page",
+        status="queued",
+        render_js=req.render_js,
     )
+    db.add(audit)
+    db.commit()
+    db.refresh(audit)
+    return audit
 
+
+def apply_result(
+    db: Session, audit: models.Audit, response: AuditResponse
+) -> models.Audit:
+    """Write a finished audit's scored result onto its (queued) row."""
+    audit.final_url = response.final_url
+    audit.status = response.status
+    audit.rendered_with = response.rendered_with
+    audit.reachable = bool(response.reachable)
+    audit.geo_score = response.geo_score
+    audit.grade = response.grade
+    audit.error = response.error
+    audit.report_json = response.model_dump(mode="json")
+    audit.html_url = response.html_url
+    audit.pdf_url = response.pdf_url
+    audit.completed_at = response.completed_at
+
+    # Replace any prior findings with the fresh flattened set.
+    audit.findings.clear()
     sort_index = 0
     for category in response.categories:
         for finding in category.findings:
@@ -95,10 +107,32 @@ def save_audit(
             )
             sort_index += 1
 
-    db.add(audit)
     db.commit()
     db.refresh(audit)
     return audit
+
+
+def to_response(audit: models.Audit) -> AuditResponse:
+    """Build an AuditResponse from a row.
+
+    For a finished audit the stored ``report_json`` is the source of truth; for
+    a queued/running one (no report yet) a minimal status view is returned.
+    """
+    if audit.report_json:
+        data = dict(audit.report_json)
+        # The row's status is authoritative (report_json was written at done).
+        data["status"] = audit.status
+        return AuditResponse.model_validate(data)
+    return AuditResponse(
+        audit_id=audit.id,
+        url=audit.url,
+        status=audit.status,
+        client_id=audit.client_id,
+        user_id=audit.user_id,
+        error=audit.error,
+        created_at=audit.created_at,
+        completed_at=audit.completed_at,
+    )
 
 
 def list_audits(

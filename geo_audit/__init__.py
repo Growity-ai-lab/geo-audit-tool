@@ -34,6 +34,9 @@ class CategoryResult:
     score: float          # points earned (0 .. max_score)
     max_score: float      # maximum points for this category
     findings: List[Finding] = field(default_factory=list)
+    # Optional raw metrics for this category (e.g. real Core Web Vitals:
+    # lcp_ms, cls, inp_ms, perf_score). Empty for categories without them.
+    metrics: dict = field(default_factory=dict)
 
     @property
     def ratio(self) -> float:
@@ -48,6 +51,7 @@ class CategoryResult:
             "score": round(self.score, 2),
             "max_score": self.max_score,
             "ratio": round(self.ratio, 4),
+            "metrics": self.metrics,
             "findings": [
                 {
                     "severity": f.severity,

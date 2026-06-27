@@ -47,6 +47,14 @@ class Settings:
         default_factory=lambda: os.environ.get("ENABLE_JS_RENDER", "false").lower()
         in ("1", "true", "yes")
     )
+    # PageSpeed Insights (A5). When a key is set, audits fetch real Core Web
+    # Vitals (LCP/CLS/INP + Lighthouse perf). Empty => crawlability-only scoring.
+    psi_api_key: str = field(
+        default_factory=lambda: os.environ.get("PAGESPEED_API_KEY", "")
+    )
+    psi_strategy: str = field(
+        default_factory=lambda: os.environ.get("PSI_STRATEGY", "mobile")
+    )
 
     # --- Auth (A3) -------------------------------------------------------- #
     # JWT signing secret. MUST be set in production; a dev fallback is used
@@ -69,6 +77,27 @@ class Settings:
     )
     admin_password: str = field(
         default_factory=lambda: os.environ.get("ADMIN_PASSWORD", "")
+    )
+
+    # --- Celery / queue (A4) ---------------------------------------------- #
+    celery_broker_url: str = field(
+        default_factory=lambda: os.environ.get(
+            "CELERY_BROKER_URL", "redis://localhost:6379/0"
+        )
+    )
+    celery_result_backend: str = field(
+        default_factory=lambda: os.environ.get(
+            "CELERY_RESULT_BACKEND", "redis://localhost:6379/0"
+        )
+    )
+    # When true, audit tasks run inline in the calling process (no broker
+    # needed). Default true so the app works out-of-the-box; Compose/prod set
+    # this false and run a dedicated Celery worker.
+    celery_eager: bool = field(
+        default_factory=lambda: os.environ.get(
+            "CELERY_TASK_ALWAYS_EAGER", "true"
+        ).lower()
+        in ("1", "true", "yes")
     )
 
 

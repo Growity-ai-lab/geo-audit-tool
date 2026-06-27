@@ -1,12 +1,13 @@
 """Audit endpoints: run, persist, list, fetch detail, and serve artifacts."""
 
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from .. import auth, models, repository, service, storage
+from .. import auth, models, repository, storage, tasks
 from ..db import get_db
 from ..schemas import (
     AuditListResponse,
@@ -24,15 +25,19 @@ _MEDIA_TYPES = {
 }
 
 
-# Defined as a *sync* endpoint on purpose: the engine (and Playwright's sync
-# API for PDF) block, so Starlette runs this in a worker thread, keeping the
-# event loop free and avoiding the asyncio/sync-Playwright conflict.
-@router.post("/audits", response_model=AuditResponse)
+@router.post("/audits", response_model=AuditResponse, status_code=202)
 def create_audit(
     req: AuditRequest,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user),
 ) -> AuditResponse:
+    """Enqueue an audit and return its id + status.
+
+    The heavy work (crawl + PDF) runs in a Celery worker; clients poll
+    ``GET /audits/{id}`` until status is ``done`` or ``error``. With the eager
+    fallback (no broker) the task runs inline and the response already says
+    ``done``.
+    """
     if not req.url or not req.url.strip():
         raise HTTPException(status_code=422, detail="url is required")
 
@@ -44,10 +49,21 @@ def create_audit(
             raise HTTPException(status_code=404, detail="client not found")
         client_name = client.name
 
-    response = service.run_audit(req, client_name=client_name)
-    response.user_id = current_user.id
-    repository.save_audit(db, response, render_js=req.render_js)
-    return response
+    audit_id = uuid.uuid4().hex
+    repository.create_queued_audit(db, audit_id=audit_id, req=req, user_id=current_user.id)
+
+    tasks.run_audit_task.delay(
+        audit_id=audit_id,
+        url=req.url,
+        client_name=client_name,
+        brand=req.brand,
+        render_js=req.render_js,
+    )
+
+    # Re-read so eager-mode runs (which finish inline) report their final state.
+    db.expire_all()
+    audit = repository.get_audit(db, audit_id)
+    return repository.to_response(audit)
 
 
 @router.get("/audits", response_model=AuditListResponse)
@@ -87,10 +103,9 @@ def get_audit(
     current_user: models.User = Depends(auth.get_current_user),
 ) -> AuditResponse:
     audit = repository.get_audit(db, audit_id)
-    if audit is None or not audit.report_json:
+    if audit is None:
         raise HTTPException(status_code=404, detail="audit not found")
-    # report_json is a serialized AuditResponse; let FastAPI re-validate it.
-    return AuditResponse.model_validate(audit.report_json)
+    return repository.to_response(audit)
 
 
 @router.get("/audits/{audit_id}/{name}")
