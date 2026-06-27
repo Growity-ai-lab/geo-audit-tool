@@ -1,7 +1,36 @@
 """Tests for the pluggable Fetcher layer (no real network)."""
 
 from geo_audit.crawler import Crawler, CrawlResult
-from geo_audit.fetcher import FetchResponse, RequestsFetcher
+from geo_audit.fetcher import FallbackFetcher, FetchResponse, RequestsFetcher
+
+
+def _resp(rendered_with: str) -> FetchResponse:
+    return FetchResponse(
+        final_url="https://example.com/",
+        status_code=200,
+        ok=True,
+        text="<html></html>",
+        rendered_with=rendered_with,
+    )
+
+
+class _OkFetcher:
+    def __init__(self, rendered_with: str):
+        self._rendered_with = rendered_with
+        self.calls = 0
+
+    def fetch(self, url: str) -> FetchResponse:
+        self.calls += 1
+        return _resp(self._rendered_with)
+
+
+class _BoomFetcher:
+    def __init__(self):
+        self.calls = 0
+
+    def fetch(self, url: str) -> FetchResponse:
+        self.calls += 1
+        raise RuntimeError("browser unavailable")
 
 
 class _FakeFetcher:
@@ -61,3 +90,31 @@ def test_fetch_failure_is_graceful():
     result = crawler.crawl("example.com")
     assert result.ok is False
     assert result.error and "browser crashed" in result.error
+
+
+def test_fallback_uses_primary_when_it_succeeds():
+    primary = _OkFetcher("playwright")
+    fallback = _OkFetcher("requests")
+    resp = FallbackFetcher(primary, fallback).fetch("https://example.com")
+    assert resp.rendered_with == "playwright"
+    assert primary.calls == 1
+    assert fallback.calls == 0  # fallback never touched
+
+
+def test_fallback_degrades_when_primary_fails():
+    primary = _BoomFetcher()
+    fallback = _OkFetcher("requests")
+    resp = FallbackFetcher(primary, fallback).fetch("https://example.com")
+    # Audit still gets a result, marked as the fallback path.
+    assert resp.rendered_with == "requests"
+    assert primary.calls == 1
+    assert fallback.calls == 1
+
+
+def test_crawler_with_fallback_records_requests_on_degrade():
+    # End-to-end through Crawler: primary (JS) fails → requests result, no crash.
+    crawler = Crawler(fetcher=FallbackFetcher(_BoomFetcher(), _OkFetcher("requests")))
+    crawler._fetch_text = lambda url: None  # no sidecar network
+    result = crawler.crawl("example.com")
+    assert result.ok is True
+    assert result.rendered_with == "requests"

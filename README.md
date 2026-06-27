@@ -180,6 +180,16 @@ Tüm giriş yapan kullanıcılar tüm audit/müşterileri görür (paylaşımlı
 (`ENABLE_JS_RENDER=true` gerekir). Müşteri silinince audit geçmişi korunur
 (`client_id` NULL'a çekilir).
 
+### JavaScript render — SPA siteleri (A6)
+
+İstekte `render_js=true` gönderilirse (arayüzdeki onay kutusu) sayfa **headless
+Chromium** ile render edilir; böylece içeriğini JavaScript ile üreten tek-sayfa
+uygulamalarında (SPA) bir AI tarayıcısının gerçekten gördüğü DOM analiz edilir.
+Gerektirir: `ENABLE_JS_RENDER=true` ve tarayıcılı imaj (worker). Render
+başarısız olursa (tarayıcı yok / zaman aşımı) audit **çökmez**; ham HTML'e
+(`requests`) zarifçe düşer ve sonuçta `rendered_with` hangi yolun kullanıldığını
+gösterir. Sonucun raw HTML'e mi yoksa render'a mı dayandığı raporda görünür.
+
 ### Gerçek Core Web Vitals (A5)
 
 `PAGESPEED_API_KEY` ayarlanırsa her audit, **Google PageSpeed Insights**'tan

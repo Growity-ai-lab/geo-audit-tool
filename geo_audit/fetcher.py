@@ -19,11 +19,14 @@ lightweight ``requests`` session for those.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Dict, Protocol
 
 import requests
+
+logger = logging.getLogger("geo_audit.fetcher")
 
 DEFAULT_TIMEOUT = 15
 DEFAULT_UA = (
@@ -159,3 +162,28 @@ class PlaywrightFetcher:
             elapsed_ms=elapsed_ms,
             rendered_with="playwright",
         )
+
+
+class FallbackFetcher:
+    """Try a primary fetcher, fall back to a secondary one on any failure.
+
+    Used for JS rendering: attempt headless Chromium first, but if the browser
+    is unavailable or the render fails/times out, fall back to a plain requests
+    GET so the audit still produces a result (degraded, not crashed). The
+    returned ``FetchResponse.rendered_with`` reflects which path actually ran.
+    """
+
+    def __init__(self, primary: "Fetcher", fallback: "Fetcher"):
+        self.primary = primary
+        self.fallback = fallback
+
+    def fetch(self, url: str) -> FetchResponse:
+        try:
+            return self.primary.fetch(url)
+        except Exception as exc:  # noqa: BLE001 - any primary failure degrades
+            logger.warning(
+                "Primary fetch failed (%s); falling back to %s",
+                exc,
+                type(self.fallback).__name__,
+            )
+            return self.fallback.fetch(url)
