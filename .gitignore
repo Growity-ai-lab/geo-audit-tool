@@ -16,6 +16,9 @@ node_modules/
 # Runtime audit artifacts (HTML/PDF) written by the API
 data/
 
+# Local SQLite databases
+*.db
+
 # Generated reports
 ornek-rapor.html
 *-report.html

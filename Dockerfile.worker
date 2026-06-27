@@ -16,6 +16,8 @@ RUN pip install --no-cache-dir -r requirements-api.txt
 
 COPY geo_audit ./geo_audit
 COPY api ./api
+COPY alembic.ini ./
+COPY alembic ./alembic
 
 # Placeholder entrypoint until the Celery app exists (A4):
 #   CMD ["celery", "-A", "api.worker.celery_app", "worker", "--loglevel=info"]

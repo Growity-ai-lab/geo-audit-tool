@@ -1,23 +1,44 @@
-# A1 local stack: FastAPI (synchronous audits + PDF) + Next.js frontend.
-# Redis / Postgres / Celery worker arrive in later phases (A2, A4).
+# A2 local stack: Postgres + FastAPI (synchronous audits + PDF) + Next.js.
+# Redis / Celery worker arrive in later phases (A4).
 #
 # Usage:
 #   docker compose up --build
 #   open http://localhost:3000  → enter a URL → download the branded PDF.
 
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=geo
+      - POSTGRES_PASSWORD=geo
+      - POSTGRES_DB=geo
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   api:
     build:
       context: .
       dockerfile: Dockerfile.api
+    # Apply migrations, then serve. (Image CMD does the same; spelled out here
+    # so it's visible and waits on the DB being ready.)
+    command: sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "8000:8000"
     environment:
+      - DATABASE_URL=postgresql://geo:geo@db:5432/geo
       - CORS_ORIGINS=http://localhost:3000
       - ARTIFACTS_DIR=/data/artifacts
       - ENABLE_JS_RENDER=true
     volumes:
       - artifacts:/data/artifacts
+    depends_on:
+      db:
+        condition: service_healthy
 
   frontend:
     build:
@@ -33,3 +54,4 @@ services:
 
 volumes:
   artifacts:
+  pgdata:

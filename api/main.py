@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from geo_audit import __version__
 
 from .config import settings
-from .routes import audits
+from .routes import audits, clients
 from .schemas import HealthResponse
 
 logging.basicConfig(level=logging.INFO)
@@ -36,6 +36,7 @@ app.add_middleware(
 )
 
 app.include_router(audits.router)
+app.include_router(clients.router)
 
 
 @app.get("/healthz", response_model=HealthResponse, tags=["meta"])
