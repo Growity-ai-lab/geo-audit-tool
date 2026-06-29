@@ -84,6 +84,23 @@ export interface AuditCategory {
 
 export type AuditStatus = "queued" | "running" | "done" | "error";
 
+export interface RenderDelta {
+  key: string;
+  name: string;
+  raw: number;
+  rendered: number;
+  delta: number;
+  max_score: number;
+}
+
+export interface RenderComparison {
+  raw: { geo_score: number; grade: string };
+  rendered: { geo_score: number; grade: string };
+  delta_total: number;
+  deltas: RenderDelta[];
+  spa_suspected: boolean;
+}
+
 export interface AuditResult {
   audit_id: string;
   url: string;
@@ -95,6 +112,8 @@ export interface AuditResult {
   grade: string | null;
   rendered_with: string | null;
   categories: AuditCategory[];
+  spa_suspected: boolean;
+  render_comparison: RenderComparison | null;
   html_url: string | null;
   pdf_url: string | null;
   status: AuditStatus;
@@ -104,6 +123,7 @@ export interface AuditInput {
   url: string;
   client?: string;
   render_js?: boolean;
+  compare_render?: boolean;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

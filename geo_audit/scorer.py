@@ -33,6 +33,11 @@ class AuditReport:
     max_score: float
     grade: str
     categories: List[CategoryResult] = field(default_factory=list)
+    # Set by the orchestration layer, not score(): a heuristic that the page is
+    # a client-side-rendered SPA (on-page signals collapse without JS), and an
+    # optional raw-vs-rendered comparison ("what AI sees vs what users see").
+    spa_suspected: bool = False
+    render_comparison: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -43,6 +48,8 @@ class AuditReport:
             "geo_score": round(self.total_score, 1),
             "max_score": self.max_score,
             "grade": self.grade,
+            "spa_suspected": self.spa_suspected,
+            "render_comparison": self.render_comparison,
             "categories": [c.to_dict() for c in self.categories],
         }
 
@@ -119,3 +126,77 @@ def score(crawl_result: "crawler_mod.CrawlResult") -> AuditReport:
         grade=grade_for(total),
         categories=categories,
     )
+
+
+# On-page categories whose signals only exist once HTML/JS has produced content.
+# If these collapse on a raw (no-JS) fetch, the page is likely a client-rendered
+# SPA — the same near-empty shell most AI crawlers see.
+ONPAGE_KEYS = ("schema", "content", "meta")
+SPA_ONPAGE_RATIO = 0.15        # earned/max below this on a raw fetch => suspect
+SPA_DELTA_POINTS = 10.0        # rendered beats raw by this => confirmed gap
+
+
+def looks_like_spa(report: AuditReport) -> bool:
+    """Heuristic (single raw report): on-page signals nearly absent.
+
+    Meaningful for a requests (no-JS) fetch of a reachable page: when schema +
+    content + meta together earn almost nothing, the served HTML is most likely
+    an empty JS shell.
+    """
+    if not report.reachable:
+        return False
+    cats = {c.key: c for c in report.categories}
+    onpage = [cats[k] for k in ONPAGE_KEYS if k in cats]
+    if not onpage:
+        return False
+    earned = sum(c.score for c in onpage)
+    total = sum(c.max_score for c in onpage)
+    return total > 0 and (earned / total) < SPA_ONPAGE_RATIO
+
+
+def _summary(report: AuditReport) -> dict:
+    return {
+        "geo_score": round(report.total_score, 1),
+        "grade": report.grade,
+        "categories": [
+            {
+                "key": c.key,
+                "name": c.name,
+                "score": round(c.score, 1),
+                "max_score": c.max_score,
+            }
+            for c in report.categories
+        ],
+    }
+
+
+def build_render_comparison(raw: AuditReport, rendered: AuditReport) -> dict:
+    """Compare a raw (no-JS) report against a JS-rendered one.
+
+    Frames the gap as "what AI crawlers see (raw)" vs "what users see
+    (rendered)". A large positive delta means the site hides on-page signals
+    behind client-side rendering.
+    """
+    raw_cats = {c.key: c for c in raw.categories}
+    deltas = []
+    for c in rendered.categories:
+        r = raw_cats.get(c.key)
+        raw_score = round(r.score, 1) if r else 0.0
+        deltas.append(
+            {
+                "key": c.key,
+                "name": c.name,
+                "raw": raw_score,
+                "rendered": round(c.score, 1),
+                "delta": round(c.score - raw_score, 1),
+                "max_score": c.max_score,
+            }
+        )
+    delta_total = round(rendered.total_score - raw.total_score, 1)
+    return {
+        "raw": _summary(raw),
+        "rendered": _summary(rendered),
+        "delta_total": delta_total,
+        "deltas": deltas,
+        "spa_suspected": delta_total >= SPA_DELTA_POINTS,
+    }

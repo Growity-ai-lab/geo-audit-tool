@@ -362,7 +362,8 @@ def render_html(
 
     offering = _offering_block(brand)
 
-    body = cover + summary + explain + priority + "".join(cat_blocks) + offering
+    gap = _render_gap_block(report)
+    body = cover + summary + gap + explain + priority + "".join(cat_blocks) + offering
     return _html_shell(logo_html, brand, report.final_url, when, body)
 
 
@@ -375,6 +376,54 @@ _GRADE_BANDS = [
     ("E", "50-59", "Zayıf"),
     ("F", "0-49", "Kritik"),
 ]
+
+
+def _render_gap_block(report: AuditReport) -> str:
+    """Render the raw-vs-rendered comparison, or a SPA warning, or nothing."""
+    comp = report.render_comparison
+    if comp:
+        raw, ren = comp["raw"], comp["rendered"]
+        rows = ""
+        for d in comp["deltas"]:
+            if abs(d["delta"]) < 0.05:
+                continue
+            up = d["delta"] > 0
+            rows += (
+                f"<tr><td>{_esc(d['name'])}</td><td>{d['raw']:.1f}</td>"
+                f"<td>{d['rendered']:.1f}</td>"
+                f"<td class='dl' style='color:{'#15803d' if up else '#b91c1c'}'>"
+                f"{'▲' if up else '▼'} {abs(d['delta']):.1f}</td></tr>"
+            )
+        if not rows:
+            rows = "<tr><td colspan='4'>Render ile anlamlı fark bulunmadı.</td></tr>"
+        return f"""
+    <section class="card gap">
+      <h2><span class="h2-accent"></span>AI'ın Gördüğü vs Kullanıcının Gördüğü</h2>
+      <p class="gap-lead">Bu site içeriğinin bir kısmını tarayıcıda JavaScript ile
+      üretiyor. AI tarayıcıları (GPTBot, ClaudeBot, PerplexityBot…) çoğunlukla
+      JavaScript çalıştırmaz; bu yüzden aşağıdaki <b>Ham HTML</b> sütunu, bu
+      motorların pratikte gördüğü puandır.</p>
+      <div class="gap-scores">
+        <div class="gap-score"><span>Ham HTML — AI motorları</span><b style="color:{_hue(raw['geo_score']/100)}">{raw['geo_score']:.0f} <i>{raw['grade']}</i></b></div>
+        <div class="gap-arrow">+{comp['delta_total']:.0f}</div>
+        <div class="gap-score"><span>JS sonrası — kullanıcı</span><b style="color:{_hue(ren['geo_score']/100)}">{ren['geo_score']:.0f} <i>{ren['grade']}</i></b></div>
+      </div>
+      <table class="deltas"><thead><tr><th>Kategori</th><th>Ham</th><th>JS</th><th>Fark</th></tr></thead><tbody>{rows}</tbody></table>
+      <p class="gap-fix">Öneri: başlık, meta, schema ve ana içeriği <b>sunucu
+      tarafında üretin</b> (SSR / prerender) — böylece AI motorları da kullanıcının
+      gördüğü içeriği görür.</p>
+    </section>"""
+    if report.spa_suspected:
+        return """
+    <section class="card gap-warn">
+      <h2><span class="h2-accent"></span>⚠️ Olası SPA — içerik JavaScript ile üretiliyor olabilir</h2>
+      <p>Sayfanın sunucudan dönen HTML'inde başlık, meta ve içerik sinyalleri
+      neredeyse yok; içerik büyük olasılıkla tarayıcıda JavaScript ile yükleniyor.
+      <b>AI tarayıcıları bunu çoğunlukla göremez.</b> Aracı "JavaScript ile render
+      et" seçeneğiyle tekrar çalıştırın; kalıcı çözüm için kritik içeriği sunucu
+      tarafında üretin (SSR / prerender).</p>
+    </section>"""
+    return ""
 
 
 def _explainer_block(grade: str) -> str:
@@ -533,6 +582,23 @@ def _html_shell(logo_html, brand, url, when, body) -> str:
   footer {{ margin-top:30px; padding-top:18px; border-top:1px solid var(--line);
             font-size:11.5px; color:var(--muted); text-align:center; }}
   footer .scoring {{ margin-top:6px; }}
+
+  /* Render gap / SPA */
+  .gap-warn {{ border-color:#f59e0b; background:#fffbeb; }}
+  .gap-warn h2 {{ color:#b45309; }}
+  .gap-warn p {{ font-size:14px; margin:0; }}
+  .gap-lead {{ font-size:13.5px; margin:0 0 14px; }}
+  .gap-fix {{ font-size:13px; color:var(--muted); margin:12px 0 0; }}
+  .gap-scores {{ display:flex; align-items:center; justify-content:center; gap:18px; margin:4px 0 16px; }}
+  .gap-score {{ background:var(--tint); border:1px solid var(--line); border-radius:12px; padding:10px 18px; text-align:center; min-width:150px; }}
+  .gap-score span {{ display:block; font-size:11px; color:var(--muted); margin-bottom:3px; }}
+  .gap-score b {{ font-size:24px; font-weight:800; }} .gap-score i {{ font-style:normal; font-size:14px; }}
+  .gap-arrow {{ font-size:18px; font-weight:800; color:var(--brand); }}
+  .deltas {{ width:100%; border-collapse:collapse; font-size:13.5px; }}
+  .deltas th, .deltas td {{ padding:7px 8px; border-top:1px solid var(--line); text-align:left; }}
+  .deltas th {{ color:var(--muted); font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; }}
+  .deltas td:nth-child(2), .deltas td:nth-child(3), .deltas th:nth-child(2), .deltas th:nth-child(3) {{ text-align:right; color:var(--muted); }}
+  .deltas .dl {{ text-align:right; font-weight:700; }}
 
   @media print {{
     body {{ background:#fff; }}

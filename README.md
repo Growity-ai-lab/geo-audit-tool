@@ -190,6 +190,20 @@ başarısız olursa (tarayıcı yok / zaman aşımı) audit **çökmez**; ham HT
 (`requests`) zarifçe düşer ve sonuçta `rendered_with` hangi yolun kullanıldığını
 gösterir. Sonucun raw HTML'e mi yoksa render'a mı dayandığı raporda görünür.
 
+### SPA tespiti & "AI vs kullanıcı" render karşılaştırması
+
+İçeriğini JavaScript ile üreten (SPA) siteler, sunucudan **boş bir kabuk**
+döndürür — ve AI tarayıcıları (GPTBot, ClaudeBot, PerplexityBot) çoğunlukla JS
+çalıştırmadığı için bu kabuğu görür. Tool bunu iki şekilde yakalar:
+
+- **Otomatik SPA uyarısı:** Normal (JS'siz) bir denetimde başlık/meta/içerik
+  sinyalleri birlikte çökerse rapora `spa_suspected` uyarısı eklenir.
+- **Karşılaştırma modu** (`compare_render=true` / arayüzdeki onay kutusu):
+  audit **iki kez** çalışır — ham HTML vs JS-render — ve farkı gösterir:
+  *"AI motorlarının gördüğü"* puan ile *"kullanıcının gördüğü"* puan, kategori
+  bazında. Büyük fark = içerik istemci tarafında gizleniyor → SSR/prerender önerilir.
+  (Bu modda PSI devre dışıdır; fark yalnızca render etkisini izole eder.)
+
 ### Gerçek Core Web Vitals (A5)
 
 `PAGESPEED_API_KEY` ayarlanırsa her audit, **Google PageSpeed Insights**'tan

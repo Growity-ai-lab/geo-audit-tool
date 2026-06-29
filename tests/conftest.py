@@ -53,7 +53,7 @@ def _deterministic_audits(tmp_path, monkeypatch):
     run Celery tasks inline (eager) so no broker is needed."""
     monkeypatch.setattr(settings, "artifacts_dir", str(tmp_path))
 
-    def _fake_build_crawler(render_js: bool) -> Crawler:
+    def _fake_build_crawler(render_js: bool, with_psi: bool = True) -> Crawler:
         crawler = Crawler(fetcher=_FakeFetcher())
         crawler._fetch_text = lambda url: None  # no sidecar network
         return crawler

@@ -11,6 +11,7 @@ import {
   runAudit,
   type AuditResult,
   type CurrentUser,
+  type RenderComparison,
 } from "../lib/api";
 
 const GRADE_COLORS: Record<string, string> = {
@@ -123,6 +124,7 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
   const [url, setUrl] = useState("");
   const [client, setClient] = useState("");
   const [renderJs, setRenderJs] = useState(false);
+  const [compareRender, setCompareRender] = useState(false);
   const [loading, setLoading] = useState(false);
   const [statusText, setStatusText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -140,7 +142,8 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
         {
           url: url.trim(),
           client: client.trim() || undefined,
-          render_js: renderJs,
+          render_js: renderJs || compareRender,
+          compare_render: compareRender,
         },
         (s) => setStatusText(s === "queued" ? "Kuyrukta…" : "Çalışıyor…"),
       );
@@ -224,9 +227,19 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
           <input
             type="checkbox"
             checked={renderJs}
+            disabled={compareRender}
             onChange={(e) => setRenderJs(e.target.checked)}
           />
           <span>JavaScript ile render et (SPA siteleri için)</span>
+        </label>
+
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="checkbox"
+            checked={compareRender}
+            onChange={(e) => setCompareRender(e.target.checked)}
+          />
+          <span>AI vs kullanıcı karşılaştır (ham HTML ↔ JS render farkı)</span>
         </label>
 
         <button type="submit" disabled={loading} style={buttonStyle(loading)}>
@@ -324,6 +337,12 @@ function ResultView({
         </div>
       </div>
 
+      {result.render_comparison ? (
+        <RenderComparisonView comparison={result.render_comparison} />
+      ) : (
+        result.spa_suspected && <SpaWarning />
+      )}
+
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         {pdfUrl && (
           <a href={pdfUrl} target="_blank" rel="noreferrer" style={linkButton("#2563eb")}>
@@ -377,6 +396,120 @@ function ResultView({
             );
           })}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SpaWarning() {
+  return (
+    <div
+      style={{
+        ...cardStyle,
+        background: "#3a2e10",
+        border: "1px solid #b45309",
+      }}
+    >
+      <div style={{ fontWeight: 700, color: "#fcd34d", marginBottom: 6 }}>
+        ⚠️ Olası SPA — içerik JavaScript ile üretiliyor olabilir
+      </div>
+      <div style={{ fontSize: 14, color: "#e6edf6" }}>
+        Sunucudan dönen HTML&apos;de başlık, meta ve içerik sinyalleri neredeyse
+        yok. İçerik büyük olasılıkla tarayıcıda JS ile yükleniyor ve{" "}
+        <b>AI tarayıcıları bunu çoğunlukla göremez</b>. &quot;AI vs kullanıcı
+        karşılaştır&quot; ile farkı görün; kalıcı çözüm için içeriği sunucu
+        tarafında üretin (SSR/prerender).
+      </div>
+    </div>
+  );
+}
+
+function RenderComparisonView({ comparison }: { comparison: RenderComparison }) {
+  const { raw, rendered, delta_total, deltas } = comparison;
+  return (
+    <div style={cardStyle}>
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>
+        AI&apos;ın gördüğü vs kullanıcının gördüğü
+      </div>
+      <div style={{ fontSize: 13, color: "#9fb0c7", marginBottom: 14 }}>
+        AI tarayıcıları çoğunlukla JavaScript çalıştırmaz — &quot;Ham HTML&quot;
+        sütunu motorların pratikte gördüğü puandır.
+      </div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 18,
+          marginBottom: 16,
+        }}
+      >
+        <ScorePill label="Ham HTML — AI" score={raw.geo_score} grade={raw.grade} />
+        <span style={{ fontWeight: 800, color: "#22c55e" }}>
+          +{Math.round(delta_total)}
+        </span>
+        <ScorePill
+          label="JS sonrası — kullanıcı"
+          score={rendered.geo_score}
+          grade={rendered.grade}
+        />
+      </div>
+      <div style={{ display: "grid", gap: 6 }}>
+        {deltas
+          .filter((d) => Math.abs(d.delta) >= 0.05)
+          .map((d) => (
+            <div
+              key={d.key}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr auto auto auto",
+                gap: 10,
+                fontSize: 13,
+                padding: "5px 0",
+                borderTop: "1px solid #1f2c47",
+              }}
+            >
+              <span>{d.name}</span>
+              <span style={{ color: "#9fb0c7" }}>{d.raw.toFixed(1)}</span>
+              <span style={{ color: "#9fb0c7" }}>→ {d.rendered.toFixed(1)}</span>
+              <span
+                style={{
+                  fontWeight: 700,
+                  color: d.delta > 0 ? "#22c55e" : "#ef4444",
+                }}
+              >
+                {d.delta > 0 ? "▲" : "▼"} {Math.abs(d.delta).toFixed(1)}
+              </span>
+            </div>
+          ))}
+      </div>
+    </div>
+  );
+}
+
+function ScorePill({
+  label,
+  score,
+  grade,
+}: {
+  label: string;
+  score: number;
+  grade: string;
+}) {
+  return (
+    <div
+      style={{
+        background: "#0b1220",
+        border: "1px solid #1f2c47",
+        borderRadius: 12,
+        padding: "10px 18px",
+        textAlign: "center",
+        minWidth: 150,
+      }}
+    >
+      <div style={{ fontSize: 11, color: "#9fb0c7", marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 800 }}>
+        {Math.round(score)} <span style={{ fontSize: 14, color: "#9fb0c7" }}>{grade}</span>
       </div>
     </div>
   );
