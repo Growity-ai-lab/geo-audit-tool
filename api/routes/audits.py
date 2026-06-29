@@ -58,6 +58,7 @@ def create_audit(
         client_name=client_name,
         brand=req.brand,
         render_js=req.render_js,
+        compare_render=req.compare_render,
     )
 
     # Re-read so eager-mode runs (which finish inline) report their final state.

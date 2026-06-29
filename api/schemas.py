@@ -24,6 +24,11 @@ class AuditRequest(BaseModel):
         description="Render the page with headless Chromium (for SPAs). "
         "Requires a worker/image with Playwright browsers installed.",
     )
+    compare_render: bool = Field(
+        False,
+        description="Audit twice (raw HTML vs JS-rendered) and report the gap — "
+        "'what AI crawlers see' vs 'what users see'. Implies JS rendering.",
+    )
 
 
 class CategoryFinding(BaseModel):
@@ -58,6 +63,9 @@ class AuditResponse(BaseModel):
     grade: Optional[str] = None
     rendered_with: Optional[str] = None
     categories: List[CategorySummary] = []
+    # SPA / render-gap insight.
+    spa_suspected: bool = False
+    render_comparison: Optional[dict] = None
     # Relative artifact paths (frontend prefixes with the API base URL).
     html_url: Optional[str] = None
     pdf_url: Optional[str] = None
