@@ -87,6 +87,7 @@ def apply_result(
     audit.grade = response.grade
     audit.error = response.error
     audit.report_json = response.model_dump(mode="json")
+    audit.report_html = response.report_html
     audit.html_url = response.html_url
     audit.pdf_url = response.pdf_url
     audit.completed_at = response.completed_at

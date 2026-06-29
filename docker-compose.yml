@@ -41,7 +41,6 @@ services:
     environment:
       - DATABASE_URL=postgresql://geo:geo@db:5432/geo
       - CORS_ORIGINS=http://localhost:3000
-      - ARTIFACTS_DIR=/data/artifacts
       - ENABLE_JS_RENDER=true
       # Queue (A4): enqueue to Redis; the worker processes audits.
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -54,8 +53,6 @@ services:
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-local-dev-secret-change-me-0123456789abcd}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@growity.local}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme123}
-    volumes:
-      - artifacts:/data/artifacts
     depends_on:
       db:
         condition: service_healthy
@@ -68,16 +65,12 @@ services:
       dockerfile: Dockerfile.worker
     environment:
       - DATABASE_URL=postgresql://geo:geo@db:5432/geo
-      - ARTIFACTS_DIR=/data/artifacts
       - ENABLE_JS_RENDER=true
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - CELERY_TASK_ALWAYS_EAGER=false
       - PAGESPEED_API_KEY=${PAGESPEED_API_KEY:-}
       - PSI_STRATEGY=${PSI_STRATEGY:-mobile}
-    volumes:
-      # Shared with the API so it can serve the PDFs/HTML the worker writes.
-      - artifacts:/data/artifacts
     depends_on:
       db:
         condition: service_healthy
@@ -97,5 +90,4 @@ services:
       - api
 
 volumes:
-  artifacts:
   pgdata:

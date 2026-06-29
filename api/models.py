@@ -100,6 +100,10 @@ class Audit(Base):
 
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     report_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Rendered HTML report, stored in the DB so any service (api) can serve it
+    # and regenerate the PDF on demand — no shared filesystem needed across the
+    # split api/worker services in production.
+    report_html: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     html_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     pdf_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 

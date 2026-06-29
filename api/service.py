@@ -16,8 +16,6 @@ from geo_audit.fetcher import FallbackFetcher, PlaywrightFetcher, RequestsFetche
 from geo_audit.reporter import render_html
 from geo_audit.scorer import build_render_comparison, looks_like_spa, score
 
-from . import pdf as pdf_mod
-from . import storage
 from .config import settings
 from .schemas import AuditRequest, AuditResponse
 
@@ -108,19 +106,10 @@ def run_audit(
             logger.warning("compare_render requested but ENABLE_JS_RENDER is off; single run")
         crawl_result, report = _crawl_and_score(req)
 
+    # Render the HTML report and carry it to the persistence layer (stored in
+    # the DB). The PDF is produced on demand by the API from this HTML, so no
+    # shared filesystem is needed between the worker and the API.
     html = render_html(report, brand=brand, client=cover_client)
-    storage.save_html(audit_id, html)
-    html_url = f"/audits/{audit_id}/report.html"
-
-    # PDF is best-effort: if Chromium is unavailable the audit still succeeds
-    # with JSON + HTML, and the client simply doesn't get a pdf_url.
-    pdf_url = None
-    try:
-        pdf_bytes = pdf_mod.html_to_pdf(html)
-        storage.save_pdf(audit_id, pdf_bytes)
-        pdf_url = f"/audits/{audit_id}/report.pdf"
-    except Exception as exc:  # noqa: BLE001 - browser may be missing/broken
-        logger.warning("PDF render failed for %s: %s", audit_id, exc)
 
     data = report.to_dict()
     return AuditResponse(
@@ -136,8 +125,9 @@ def run_audit(
         categories=data["categories"],
         spa_suspected=data["spa_suspected"],
         render_comparison=data["render_comparison"],
-        html_url=html_url,
-        pdf_url=pdf_url,
+        html_url=f"/audits/{audit_id}/report.html",
+        pdf_url=f"/audits/{audit_id}/report.pdf",
+        report_html=html,
         client_id=req.client_id,
         scope="page",
         status="done" if data["reachable"] else "error",

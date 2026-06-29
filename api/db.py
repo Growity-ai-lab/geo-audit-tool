@@ -19,6 +19,14 @@ class Base(DeclarativeBase):
     """Declarative base shared by all ORM models."""
 
 
+def _normalize_url(url: str) -> str:
+    # Managed Postgres providers (e.g. Render) hand out "postgres://" URLs, but
+    # SQLAlchemy 2.0 requires the "postgresql://" scheme. Normalize it.
+    if url.startswith("postgres://"):
+        return "postgresql://" + url[len("postgres://"):]
+    return url
+
+
 def _engine_kwargs(url: str) -> dict:
     # SQLite needs check_same_thread disabled for the threadpool-served
     # sync endpoints; Postgres uses sensible pool defaults.
@@ -27,7 +35,8 @@ def _engine_kwargs(url: str) -> dict:
     return {"pool_pre_ping": True}
 
 
-engine = create_engine(settings.database_url, **_engine_kwargs(settings.database_url))
+_db_url = _normalize_url(settings.database_url)
+engine = create_engine(_db_url, **_engine_kwargs(_db_url))
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
