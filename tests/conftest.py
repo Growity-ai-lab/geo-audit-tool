@@ -13,9 +13,8 @@ from sqlalchemy.orm import sessionmaker
 
 from api import auth as auth_mod
 from api import db as db_module
-from api import models, service
+from api import models, pdf as pdf_module, service
 from api.celery_app import celery_app
-from api.config import settings
 from api.db import Base, get_db
 from api.main import app
 from geo_audit.crawler import Crawler
@@ -48,10 +47,9 @@ class _FakeFetcher:
 
 
 @pytest.fixture(autouse=True)
-def _deterministic_audits(tmp_path, monkeypatch):
-    """Make audits deterministic: temp artifacts, fake fetch, stubbed PDF, and
-    run Celery tasks inline (eager) so no broker is needed."""
-    monkeypatch.setattr(settings, "artifacts_dir", str(tmp_path))
+def _deterministic_audits(monkeypatch):
+    """Make audits deterministic: fake fetch, stubbed PDF, and run Celery tasks
+    inline (eager) so the suite never touches the network, Chromium, or Redis."""
 
     def _fake_build_crawler(render_js: bool, with_psi: bool = True) -> Crawler:
         crawler = Crawler(fetcher=_FakeFetcher())
@@ -59,7 +57,8 @@ def _deterministic_audits(tmp_path, monkeypatch):
         return crawler
 
     monkeypatch.setattr(service, "_build_crawler", _fake_build_crawler)
-    monkeypatch.setattr(service.pdf_mod, "html_to_pdf", lambda html: b"%PDF-1.4 fake")
+    # The PDF is rendered on demand by the artifact route (api.pdf).
+    monkeypatch.setattr(pdf_module, "html_to_pdf", lambda html: b"%PDF-1.4 fake")
     monkeypatch.setattr(celery_app.conf, "task_always_eager", True)
 
 

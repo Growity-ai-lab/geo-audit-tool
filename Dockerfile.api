@@ -1,16 +1,13 @@
-# A1 API image.
+# API image.
 #
-# Based on the Playwright Python image because A1 runs audits *synchronously* —
-# the same process renders the report PDF via headless Chromium. When PDF moves
-# to a dedicated Celery worker (Phase A4), this image can slim down to a plain
-# python-slim base and the browser stays only in Dockerfile.worker.
+# Based on the Playwright Python image because the API renders report PDFs on
+# demand via headless Chromium (the HTML report itself lives in the DB).
 FROM mcr.microsoft.com/playwright/python:v1.49.1-jammy
 
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    ARTIFACTS_DIR=/data/artifacts
+    PIP_NO_CACHE_DIR=1
 
 # requirements-api.txt references requirements.txt via "-r", so copy both.
 COPY requirements.txt requirements-api.txt ./
@@ -21,7 +18,6 @@ COPY api ./api
 COPY main.py alembic.ini ./
 COPY alembic ./alembic
 
-RUN mkdir -p /data/artifacts
 EXPOSE 8000
 
 # Apply migrations, then start the API. (Compose can override this; standalone

@@ -69,6 +69,9 @@ class AuditResponse(BaseModel):
     # Relative artifact paths (frontend prefixes with the API base URL).
     html_url: Optional[str] = None
     pdf_url: Optional[str] = None
+    # Rendered HTML carried in-memory to the persistence layer; never serialized
+    # into report_json or API responses (excluded).
+    report_html: Optional[str] = Field(default=None, exclude=True)
     # Persistence metadata.
     client_id: Optional[str] = None
     user_id: Optional[str] = None

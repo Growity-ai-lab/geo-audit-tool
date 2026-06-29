@@ -23,10 +23,6 @@ class Settings:
             "DATABASE_URL", "sqlite:///./data/geo_audit.db"
         )
     )
-    # Where rendered HTML/PDF artifacts are written and served from.
-    artifacts_dir: str = field(
-        default_factory=lambda: os.environ.get("ARTIFACTS_DIR", "data/artifacts")
-    )
     # Browser origins allowed to call the API (the Next.js frontend).
     cors_origins: List[str] = field(
         default_factory=lambda: _split_csv(

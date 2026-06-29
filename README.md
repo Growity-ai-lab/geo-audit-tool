@@ -113,7 +113,12 @@ Compose; Postgres + Redis + API + **Celery worker** + arayüzü ayağa kaldırı
 API başlarken Alembic migration'larını (`alembic upgrade head`) otomatik uygular.
 Audit'ler kuyruğa atılır ve worker tarafından işlenir (asenkron); arayüz bitene
 kadar poll eder. `http://localhost:3000` adresinde bir URL girin → GEO Score +
-indirilebilir PDF/HTML raporu (audit veritabanına kaydedilir).
+indirilebilir PDF/HTML raporu (audit veritabanına kaydedilir). Rapor HTML'i
+veritabanında saklanır; PDF API tarafından istendiğinde üretilir (paylaşımlı
+dosya sistemi gerekmez — buluta uygun).
+
+**Buluta deploy:** Render Blueprint (`render.yaml`) ile Postgres + Redis + API +
+worker + frontend tek tıkla kurulur — bkz. [DEPLOY.md](./DEPLOY.md).
 
 ### Yerel geliştirme (Docker'sız)
 
@@ -275,7 +280,6 @@ geo-audit-tool/
 │   ├── models.py            # SQLAlchemy models (User, Client, Audit, AuditFinding)
 │   ├── repository.py        # Data-access helpers
 │   ├── schemas.py           # Pydantic request/response models
-│   ├── storage.py           # Local-disk artifact store
 │   └── config.py            # Env-driven settings
 ├── alembic/                 # DB migrations (alembic upgrade head)
 ├── frontend/                # Next.js app (URL form → score + downloads)

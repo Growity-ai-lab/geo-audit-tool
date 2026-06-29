@@ -1,0 +1,112 @@
+# Render Blueprint — one-click deploy of the GEO Audit internal tool.
+#
+# Provisions: managed Postgres + Key Value (Redis) + API (web) + Celery worker +
+# Next.js frontend (web). Apply via Render → "New +" → "Blueprint" and point it
+# at this repo. See DEPLOY.md for the step-by-step.
+#
+# Notes:
+# - Service public URLs follow https://<name>.onrender.com. If a name is taken
+#   and Render appends a suffix, update CORS_ORIGINS / NEXT_PUBLIC_API_BASE_URL
+#   below to match the real URLs.
+# - Background workers have no free instance type (min: Starter). DB + web +
+#   key value can run on free while evaluating.
+# - region: frankfurt is closest to Türkiye; change if you prefer.
+
+databases:
+  - name: geo-audit-db
+    databaseName: geo
+    user: geo
+    plan: free            # free Postgres expires after 30 days — upgrade for prod
+    region: frankfurt
+
+services:
+  # --- Redis / Key Value (Celery broker + result backend) ----------------
+  - type: keyvalue
+    name: geo-audit-redis
+    plan: free
+    region: frankfurt
+    ipAllowList: []        # internal-only (no public access)
+
+  # --- API (FastAPI; serves HTML from DB + renders PDF on demand) ---------
+  - type: web
+    name: geo-audit-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile.api
+    plan: starter          # 'free' works too (sleeps when idle)
+    region: frankfurt
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: geo-audit-db
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: keyvalue
+          name: geo-audit-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: keyvalue
+          name: geo-audit-redis
+          property: connectionString
+      - key: CELERY_TASK_ALWAYS_EAGER
+        value: "false"
+      - key: ENABLE_JS_RENDER
+        value: "true"
+      - key: CORS_ORIGINS
+        value: https://geo-audit-frontend.onrender.com
+      - key: JWT_SECRET_KEY
+        generateValue: true          # Render generates a strong secret
+      - key: ADMIN_EMAIL
+        sync: false                  # set in dashboard (first admin login)
+      - key: ADMIN_PASSWORD
+        sync: false                  # set in dashboard (secret)
+      - key: PAGESPEED_API_KEY
+        sync: false                  # optional: enables real Core Web Vitals
+
+  # --- Celery worker (crawl + JS render; processes audits) ----------------
+  - type: worker
+    name: geo-audit-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile.worker
+    plan: starter
+    region: frankfurt
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: geo-audit-db
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: keyvalue
+          name: geo-audit-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: keyvalue
+          name: geo-audit-redis
+          property: connectionString
+      - key: CELERY_TASK_ALWAYS_EAGER
+        value: "false"
+      - key: ENABLE_JS_RENDER
+        value: "true"
+      - key: PAGESPEED_API_KEY
+        sync: false
+
+  # --- Frontend (Next.js) -------------------------------------------------
+  - type: web
+    name: geo-audit-frontend
+    runtime: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    plan: starter          # 'free' works too (sleeps when idle)
+    region: frankfurt
+    autoDeploy: true
+    envVars:
+      # Baked into the build as a Docker ARG (Render passes env vars as build
+      # args). Must be the API's public URL.
+      - key: NEXT_PUBLIC_API_BASE_URL
+        value: https://geo-audit-api.onrender.com
