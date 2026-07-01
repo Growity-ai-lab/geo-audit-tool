@@ -190,3 +190,45 @@ def test_check_sitemap_not_found_when_all_candidates_missing(monkeypatch):
     )
     crawler._check_sitemap(result)
     assert result.sitemap_found is False
+
+
+def test_check_sitemap_logs_diagnostics_on_failure(monkeypatch, caplog):
+    """Operators diagnosing a live "not found" need the real reason (status
+    code, timeout, non-sitemap content) in the worker logs — not silence."""
+    import logging as _logging
+
+    crawler = Crawler()
+    result = _crawl_result(
+        robots_text="User-agent: *\nSitemap: https://x.com/sitemap.xml\n"
+    )
+
+    monkeypatch.setattr(
+        crawler.session,
+        "get",
+        lambda url, **kw: _FakeResp(403, content=b"blocked", text="blocked"),
+    )
+    with caplog.at_level(_logging.WARNING, logger="geo_audit.crawler"):
+        crawler._check_sitemap(result)
+
+    assert result.sitemap_found is False
+    assert any("403" in r.message and "sitemap.xml" in r.message for r in caplog.records)
+
+
+def test_fetch_text_logs_request_exception_with_context(monkeypatch, caplog):
+    import logging as _logging
+
+    import requests as _requests
+
+    crawler = Crawler()
+
+    def _boom(url, **kw):
+        raise _requests.exceptions.Timeout("timed out")
+
+    monkeypatch.setattr(crawler.session, "get", _boom)
+    with caplog.at_level(_logging.WARNING, logger="geo_audit.crawler"):
+        resp = crawler._fetch_text("https://x.com/robots.txt", context="robots.txt")
+
+    assert resp is None
+    assert any(
+        "robots.txt" in r.message and "timed out" in r.message for r in caplog.records
+    )

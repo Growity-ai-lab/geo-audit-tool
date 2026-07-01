@@ -60,7 +60,7 @@ def test_crawler_uses_injected_fetcher():
     )
     # Use a fake sidecar fetch so robots/llms/sitemap don't hit the network.
     crawler = Crawler(fetcher=fake)
-    crawler._fetch_text = lambda url: None  # type: ignore[assignment]
+    crawler._fetch_text = lambda url, context="": None  # type: ignore[assignment]
 
     result = crawler.crawl("example.com")
 
@@ -114,7 +114,7 @@ def test_fallback_degrades_when_primary_fails():
 def test_crawler_with_fallback_records_requests_on_degrade():
     # End-to-end through Crawler: primary (JS) fails → requests result, no crash.
     crawler = Crawler(fetcher=FallbackFetcher(_BoomFetcher(), _OkFetcher("requests")))
-    crawler._fetch_text = lambda url: None  # no sidecar network
+    crawler._fetch_text = lambda url, context="": None  # no sidecar network
     result = crawler.crawl("example.com")
     assert result.ok is True
     assert result.rendered_with == "requests"
