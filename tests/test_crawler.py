@@ -31,12 +31,12 @@ SITEMAP_INDEX_XML = (
 
 
 class _FakeResp:
-    def __init__(self, status_code=200, content=b"", text="", encoding="utf-8"):
+    def __init__(self, status_code=200, content=b"", text="", encoding="utf-8", headers=None):
         self.status_code = status_code
         self.content = content
         self.text = text
         self.encoding = encoding
-        self.headers = {}
+        self.headers = headers or {}
 
 
 def _crawl_result(robots_text="", base="https://x.com"):
@@ -164,6 +164,71 @@ def test_check_sitemap_declared_directive_is_not_reprobed_or_duplicated(monkeypa
     crawler._check_sitemap(result)
     assert result.sitemap_found is True
     assert calls == ["https://x.com/sitemap.xml"]  # exactly one request, no guessing
+
+
+def test_check_sitemap_ambiguous_on_rate_limit(monkeypatch):
+    """A 429/403/503 means a WAF intervened, not that the sitemap is absent —
+    this must not be scored/reported the same as a clean 404."""
+    crawler = Crawler()
+    result = _crawl_result(
+        robots_text="User-agent: *\nSitemap: https://x.com/sitemap.xml\n"
+    )
+    monkeypatch.setattr(
+        crawler.session, "get", lambda url, **kw: _FakeResp(429, content=b"", text="")
+    )
+    crawler._check_sitemap(result)
+    assert result.sitemap_found is False
+    assert result.sitemap_ambiguous is True
+
+
+def test_check_sitemap_ambiguous_on_degraded_xml_stub(monkeypatch):
+    """Real-world regression (gree.com.tr): a 200 with an XML content-type
+    but a tiny non-sitemap body (a WAF's stub response), confirmed live to
+    differ from the site's real ~1KB sitemap fetched from an unrestricted
+    network. This reads as "blocked", not "no sitemap published"."""
+    crawler = Crawler()
+    result = _crawl_result(
+        robots_text="User-agent: *\nSitemap: https://x.com/sitemap.xml\n"
+    )
+    stub = "<error>rate limited</error>"
+    monkeypatch.setattr(
+        crawler.session,
+        "get",
+        lambda url, **kw: _FakeResp(
+            200, content=stub.encode(), text=stub,
+            headers={"Content-Type": "text/xml"},
+        ),
+    )
+    crawler._check_sitemap(result)
+    assert result.sitemap_found is False
+    assert result.sitemap_ambiguous is True
+
+
+def test_check_sitemap_not_ambiguous_on_clean_404():
+    # A clean, unambiguous 404 (or an HTML soft-404) must NOT be flagged
+    # ambiguous — that's a genuine "no sitemap here".
+    result = _crawl_result()
+    assert result.sitemap_ambiguous is False
+
+
+def test_page_speed_sitemap_ambiguous_gets_partial_credit_not_zero():
+    from geo_audit.crawler import W_SITEMAP
+
+    ambiguous = CrawlResult(
+        url="https://x", final_url="https://x", status_code=200, elapsed_ms=300,
+        headers={"content-encoding": "gzip"}, sitemap_found=False, sitemap_ambiguous=True,
+    )
+    missing = CrawlResult(
+        url="https://x", final_url="https://x", status_code=200, elapsed_ms=300,
+        headers={"content-encoding": "gzip"}, sitemap_found=False, sitemap_ambiguous=False,
+    )
+    ambiguous_score = analyze_page_speed(ambiguous).score
+    missing_score = analyze_page_speed(missing).score
+    assert ambiguous_score == missing_score + W_SITEMAP / 2
+    ambiguous_finding = next(
+        f for f in analyze_page_speed(ambiguous).findings if "erişim" in f.message.lower()
+    )
+    assert "engellenmiş" in ambiguous_finding.message or "kısıtlanmış" in ambiguous_finding.message
 
 
 def test_check_sitemap_handles_gzip_without_content_encoding_header(monkeypatch):
