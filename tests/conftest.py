@@ -53,7 +53,7 @@ def _deterministic_audits(monkeypatch):
 
     def _fake_build_crawler(render_js: bool, with_psi: bool = True) -> Crawler:
         crawler = Crawler(fetcher=_FakeFetcher())
-        crawler._fetch_text = lambda url: None  # no sidecar network
+        crawler._fetch_text = lambda url, context="": None  # no sidecar network
         return crawler
 
     monkeypatch.setattr(service, "_build_crawler", _fake_build_crawler)

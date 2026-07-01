@@ -7,6 +7,7 @@ to access the page.
 """
 
 import gzip
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Dict, Optional
@@ -17,6 +18,8 @@ import requests
 
 from . import FAIL, OK, WARN, CategoryResult, Finding
 from .fetcher import DEFAULT_TIMEOUT, DEFAULT_UA, Fetcher, RequestsFetcher
+
+logger = logging.getLogger("geo_audit.crawler")
 
 BOT_MAX_SCORE = 25.0
 SPEED_MAX_SCORE = 10.0
@@ -262,16 +265,22 @@ class Crawler:
 
     # ------------------------------------------------------------------ #
 
-    def _fetch_text(self, url: str) -> Optional[requests.Response]:
+    def _fetch_text(self, url: str, context: str = "") -> Optional[requests.Response]:
         try:
             resp = self.session.get(url, timeout=self.timeout, allow_redirects=True)
             return resp
-        except requests.RequestException:
+        except requests.RequestException as exc:
+            # Sidecar files (robots/llms/sitemap) fail silently to the caller
+            # by design (a missing one just means "not found"), but the
+            # *reason* — timeout vs. connection reset vs. TLS error — is only
+            # visible here, so log it for operators diagnosing a live audit.
+            if context:
+                logger.warning("%s fetch failed for %s: %s", context, url, exc)
             return None
 
     def _check_robots(self, result: CrawlResult) -> None:
         robots_url = urljoin(result.base_url + "/", "robots.txt")
-        resp = self._fetch_text(robots_url)
+        resp = self._fetch_text(robots_url, context="robots.txt")
 
         if (
             resp is not None
@@ -305,7 +314,7 @@ class Crawler:
     def _check_llms_txt(self, result: CrawlResult) -> None:
         result.llms_txt_found = False
         llms_url = urljoin(result.base_url + "/", "llms.txt")
-        resp = self._fetch_text(llms_url)
+        resp = self._fetch_text(llms_url, context="llms.txt")
         if resp is None or resp.status_code != 200 or not resp.text.strip():
             return
 
@@ -332,8 +341,14 @@ class Crawler:
             candidates.append(urljoin(result.base_url + "/", path))
 
         for sitemap_url in candidates:
-            resp = self._fetch_text(sitemap_url)
-            if resp is None or resp.status_code != 200 or not resp.content:
+            resp = self._fetch_text(sitemap_url, context="sitemap")
+            if resp is None:
+                continue  # already logged by _fetch_text
+            if resp.status_code != 200 or not resp.content:
+                logger.warning(
+                    "sitemap candidate %s returned HTTP %s (%d bytes)",
+                    sitemap_url, resp.status_code, len(resp.content or b""),
+                )
                 continue
             body = _decode_sitemap_body(resp)
             if body and _looks_like_sitemap(body):
@@ -341,6 +356,13 @@ class Crawler:
                 result.sitemap_url = sitemap_url
                 result.sitemap_url_count = len(re.findall(r"<loc>", body, re.I))
                 return
+            logger.warning(
+                "sitemap candidate %s returned 200 but content doesn't look "
+                "like a sitemap (%d bytes, content-type=%s)",
+                sitemap_url, len(resp.content), resp.headers.get("Content-Type", ""),
+            )
+        if candidates:
+            logger.info("sitemap not found; tried: %s", candidates)
         result.sitemap_found = False
 
 

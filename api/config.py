@@ -11,7 +11,12 @@ from typing import List
 
 
 def _split_csv(value: str) -> List[str]:
-    return [item.strip() for item in value.split(",") if item.strip()]
+    # Trailing slashes stripped: a browser's Origin header never has one, but
+    # a hand-typed dashboard value (e.g. copied from an address bar) often
+    # does — an exact-match CORS check would otherwise silently reject it.
+    return [
+        item.strip().rstrip("/") for item in value.split(",") if item.strip()
+    ]
 
 
 @dataclass

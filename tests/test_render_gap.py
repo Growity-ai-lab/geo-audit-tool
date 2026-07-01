@@ -96,7 +96,7 @@ def _install_shell_vs_full(monkeypatch):
             crawler = Crawler(fetcher=_fetcher(FULL_HTML, "playwright"))
         else:
             crawler = Crawler(fetcher=_fetcher(SHELL_HTML, "requests"))
-        crawler._fetch_text = lambda url: None
+        crawler._fetch_text = lambda url, context="": None
         return crawler
 
     monkeypatch.setattr(service, "_build_crawler", _fake)

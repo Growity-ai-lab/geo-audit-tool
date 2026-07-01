@@ -4,8 +4,11 @@
 // (defaults to the local dev API). Artifact URLs returned by the API are
 // relative, so we resolve them against the same base.
 
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+// Trailing slash stripped so `${API_BASE_URL}/auth/login`-style calls never
+// produce a double slash regardless of how the env var was entered.
+export const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"
+).replace(/\/+$/, "");
 
 const TOKEN_KEY = "geo_audit_token";
 
