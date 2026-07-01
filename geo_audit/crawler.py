@@ -330,15 +330,22 @@ class Crawler:
         result.llms_txt_content = resp.text
 
     def _check_sitemap(self, result: CrawlResult) -> None:
-        # Prefer a Sitemap: directive in robots.txt, else fall back to the
-        # conventional locations several sitemap generators (incl. Ideasoft's)
-        # use.
-        candidates = []
-        for line in result.robots_text.splitlines():
-            if line.strip().lower().startswith("sitemap:"):
-                candidates.append(line.split(":", 1)[1].strip())
-        for path in ("sitemap.xml", "sitemap_index.xml", "sitemap-index.xml"):
-            candidates.append(urljoin(result.base_url + "/", path))
+        # A Sitemap: directive in robots.txt is authoritative (sitemaps.org);
+        # only guess conventional paths when the site doesn't declare one.
+        # Guessing on top of an authoritative answer means extra, unpolite
+        # requests to a site whose robots.txt may explicitly ask for a
+        # Crawl-delay — and duplicate requests when a guessed path happens to
+        # equal the declared one (e.g. both are "/sitemap.xml").
+        declared = [
+            line.split(":", 1)[1].strip()
+            for line in result.robots_text.splitlines()
+            if line.strip().lower().startswith("sitemap:")
+        ]
+        candidates = declared or [
+            urljoin(result.base_url + "/", path)
+            for path in ("sitemap.xml", "sitemap_index.xml", "sitemap-index.xml")
+        ]
+        candidates = list(dict.fromkeys(candidates))  # de-dupe, keep order
 
         for sitemap_url in candidates:
             resp = self._fetch_text(sitemap_url, context="sitemap")
