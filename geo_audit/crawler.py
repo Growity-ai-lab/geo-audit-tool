@@ -138,6 +138,11 @@ class CrawlResult:
     sitemap_found: bool = False
     sitemap_url: str = ""
     sitemap_url_count: int = 0
+    # True when a candidate came back with a signal that a sitemap likely
+    # exists but our request was blocked/rate-limited (403/429/503, or a 200
+    # with an XML content-type whose body isn't valid sitemap markup — e.g. a
+    # WAF's degraded stub response) rather than a clean "doesn't exist" 404.
+    sitemap_ambiguous: bool = False
 
     # Real Core Web Vitals from PageSpeed Insights (A5), populated only when a
     # PSI API key is configured. None => fall back to crawlability-only scoring.
@@ -352,6 +357,11 @@ class Crawler:
             if resp is None:
                 continue  # already logged by _fetch_text
             if resp.status_code != 200 or not resp.content:
+                if resp.status_code in (403, 429, 503):
+                    # A clean "doesn't exist" is a 404; these codes mean a
+                    # WAF/rate-limiter intervened — the sitemap may well
+                    # exist, we just couldn't confirm it this time.
+                    result.sitemap_ambiguous = True
                 logger.warning(
                     "sitemap candidate %s returned HTTP %s (%d bytes)",
                     sitemap_url, resp.status_code, len(resp.content or b""),
@@ -363,10 +373,17 @@ class Crawler:
                 result.sitemap_url = sitemap_url
                 result.sitemap_url_count = len(re.findall(r"<loc>", body, re.I))
                 return
+            content_type = resp.headers.get("Content-Type", "")
+            if "xml" in content_type.lower():
+                # A 200 with an XML content-type but non-sitemap body reads as
+                # a WAF's degraded/stub response, not a genuine "no sitemap
+                # here" — a real "not found" is normally HTML (soft-404) or a
+                # non-XML content-type.
+                result.sitemap_ambiguous = True
             logger.warning(
                 "sitemap candidate %s returned 200 but content doesn't look "
                 "like a sitemap (%d bytes, content-type=%s)",
-                sitemap_url, len(resp.content), resp.headers.get("Content-Type", ""),
+                sitemap_url, len(resp.content), content_type,
             )
         if candidates:
             logger.info("sitemap not found; tried: %s", candidates)
@@ -498,6 +515,17 @@ def analyze_page_speed(result: CrawlResult) -> CategoryResult:
             else ""
         )
         findings.append(Finding(OK, f"Sitemap bulundu: {result.sitemap_url}{count}."))
+    elif result.sitemap_ambiguous:
+        score += W_SITEMAP / 2
+        findings.append(
+            Finding(
+                WARN,
+                "Sitemap erişimi doğrulanamadı — istek engellenmiş/kısıtlanmış "
+                "olabilir (bu denemede beklenmeyen bir yanıt alındı).",
+                "Farklı bir ağdan (veya biraz sonra) tekrar deneyin; sitenizin WAF/"
+                "bot-koruması otomatik denetim araçlarını geçici olarak kısıtlıyor olabilir.",
+            )
+        )
     else:
         findings.append(
             Finding(
@@ -546,6 +574,17 @@ def _analyze_page_speed_psi(result: CrawlResult) -> CategoryResult:
     if result.sitemap_found:
         score += PW_SITEMAP
         findings.append(Finding(OK, f"Sitemap bulundu: {result.sitemap_url}."))
+    elif result.sitemap_ambiguous:
+        score += PW_SITEMAP / 2
+        findings.append(
+            Finding(
+                WARN,
+                "Sitemap erişimi doğrulanamadı — istek engellenmiş/kısıtlanmış "
+                "olabilir (bu denemede beklenmeyen bir yanıt alındı).",
+                "Farklı bir ağdan (veya biraz sonra) tekrar deneyin; sitenizin WAF/"
+                "bot-koruması otomatik denetim araçlarını geçici olarak kısıtlıyor olabilir.",
+            )
+        )
     else:
         findings.append(
             Finding(
