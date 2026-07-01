@@ -66,6 +66,9 @@ class AuditResponse(BaseModel):
     # SPA / render-gap insight.
     spa_suspected: bool = False
     render_comparison: Optional[dict] = None
+    # AI-generated narrative commentary (executive summary + per-category
+    # rationale), or None if ANTHROPIC_API_KEY isn't set / generation failed.
+    ai_commentary: Optional[dict] = None
     # Relative artifact paths (frontend prefixes with the API base URL).
     html_url: Optional[str] = None
     pdf_url: Optional[str] = None

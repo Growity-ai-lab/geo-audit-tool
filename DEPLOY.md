@@ -19,6 +19,9 @@ filesystem**.
    - **ADMIN_PASSWORD** — a strong password (this seeds the bootstrap admin)
    - **PAGESPEED_API_KEY** *(optional)* — enables real Core Web Vitals
      (`api` and `worker` — set on both, or leave blank)
+   - **ANTHROPIC_API_KEY** *(optional)* — enables AI-generated report
+     commentary (executive summary + per-category rationale, Claude Haiku 4.5;
+     `api` and `worker` — set on both, or leave blank)
 4. Click **Apply**. Render builds the images and starts everything.
    `JWT_SECRET_KEY` is generated automatically.
 

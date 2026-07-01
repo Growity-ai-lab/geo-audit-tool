@@ -49,6 +49,9 @@ services:
       # Real Core Web Vitals (A5). Set PAGESPEED_API_KEY to enable.
       - PAGESPEED_API_KEY=${PAGESPEED_API_KEY:-}
       - PSI_STRATEGY=${PSI_STRATEGY:-mobile}
+      # AI report commentary. Set ANTHROPIC_API_KEY to enable.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - AI_COMMENTARY_MODEL=${AI_COMMENTARY_MODEL:-claude-haiku-4-5}
       # Auth (A3). Override these for any non-local deployment.
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-local-dev-secret-change-me-0123456789abcd}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@growity.local}
@@ -71,6 +74,8 @@ services:
       - CELERY_TASK_ALWAYS_EAGER=false
       - PAGESPEED_API_KEY=${PAGESPEED_API_KEY:-}
       - PSI_STRATEGY=${PSI_STRATEGY:-mobile}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - AI_COMMENTARY_MODEL=${AI_COMMENTARY_MODEL:-claude-haiku-4-5}
     depends_on:
       db:
         condition: service_healthy

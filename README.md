@@ -223,6 +223,19 @@ export PAGESPEED_API_KEY=...      # Google Cloud → PageSpeed Insights API
 export PSI_STRATEGY=mobile        # veya desktop (varsayılan: mobile)
 ```
 
+### AI destekli rapor yorumları
+
+`ANTHROPIC_API_KEY` ayarlanırsa her audit'e **Claude** ile üretilmiş bir
+yönetici özeti (2-3 cümle) ve her kategori için 1-2 cümlelik somut bir yorum
+eklenir — skorlar ve bulgulara dayalı, pazarlama dili olmadan. Anahtar yoksa
+veya çağrı başarısız olursa rapor **etkilenmeden** üretilir (yorum bölümleri
+görünmez). PSI gibi config-gated: istek başına açma/kapama yok.
+
+```bash
+export ANTHROPIC_API_KEY=...              # console.anthropic.com
+export AI_COMMENTARY_MODEL=claude-haiku-4-5   # varsayılan
+```
+
 ## Scoring model
 
 The GEO Score is a weighted sum of six categories (100 points total):

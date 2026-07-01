@@ -310,6 +310,7 @@ def render_html(
       </div>
     </section>"""
 
+    ai_summary = _ai_summary_block(report)
     explain = _explainer_block(report.grade)
 
     # --- Priority actions ------------------------------------------------
@@ -332,6 +333,7 @@ def render_html(
         priority = ""
 
     # --- Category breakdown ---------------------------------------------
+    cat_notes = _category_notes(report)
     cat_blocks = ['<h2 class="section-title"><span class="h2-accent"></span>Kategori Detayları</h2>']
     for cat in report.categories:
         c_ratio = cat.ratio
@@ -350,6 +352,11 @@ def render_html(
               <span class="ficon">{ic}</span>
               <div><div class="fmsg">{_esc(f.message)}</div>{rec}</div>
             </li>"""
+        note = cat_notes.get(cat.key)
+        note_html = (
+            f'<div class="ai-note"><span class="ai-note-tag">AI Yorumu</span>{_esc(note)}</div>'
+            if note else ""
+        )
         cat_blocks.append(f"""
         <section class="card category" style="border-left:4px solid {color}">
           <div class="cat-head">
@@ -358,12 +365,16 @@ def render_html(
           </div>
           <div class="bar"><div class="bar-fill" style="width:{c_ratio*100:.0f}%;background:{color}"></div></div>
           <ul class="findings">{findings_html}</ul>
+          {note_html}
         </section>""")
 
     offering = _offering_block(brand)
 
     gap = _render_gap_block(report)
-    body = cover + summary + gap + explain + priority + "".join(cat_blocks) + offering
+    body = (
+        cover + summary + ai_summary + gap + explain + priority
+        + "".join(cat_blocks) + offering
+    )
     return _html_shell(logo_html, brand, report.final_url, when, body)
 
 
@@ -376,6 +387,26 @@ _GRADE_BANDS = [
     ("E", "50-59", "Zayıf"),
     ("F", "0-49", "Kritik"),
 ]
+
+
+def _category_notes(report: AuditReport) -> dict:
+    """Category-key -> AI rationale lookup (empty dict if none generated)."""
+    commentary = report.ai_commentary
+    if not commentary:
+        return {}
+    return {n["key"]: n["note"] for n in commentary.get("category_notes", [])}
+
+
+def _ai_summary_block(report: AuditReport) -> str:
+    """AI-generated executive summary card, or nothing if not generated."""
+    commentary = report.ai_commentary
+    if not commentary or not commentary.get("executive_summary"):
+        return ""
+    return f"""
+    <section class="card ai-summary">
+      <h2><span class="h2-accent"></span>✨ AI Değerlendirmesi</h2>
+      <p>{_esc(commentary['executive_summary'])}</p>
+    </section>"""
 
 
 def _render_gap_block(report: AuditReport) -> str:
@@ -560,6 +591,14 @@ def _html_shell(logo_html, brand, url, when, body) -> str:
   .finding.fail .ficon {{ background:#dc2626; }}
   .fmsg {{ font-size:14px; }}
   .rec {{ font-size:13px; color:var(--muted); margin-top:3px; padding-left:12px; border-left:2px solid var(--line); }}
+
+  /* AI commentary */
+  .ai-summary {{ background:linear-gradient(135deg,var(--tint),#fff); border-color:var(--brand); }}
+  .ai-summary p {{ margin:0; font-size:14.5px; }}
+  .ai-note {{ margin-top:12px; padding:10px 12px; background:var(--tint); border-radius:10px;
+              font-size:13px; color:var(--ink); }}
+  .ai-note-tag {{ display:inline-block; font-size:10.5px; font-weight:800; letter-spacing:.06em;
+                  text-transform:uppercase; color:var(--brand); margin-right:8px; }}
 
   /* Explainer + bands */
   .explain p {{ margin:0 0 16px; font-size:14px; }}
