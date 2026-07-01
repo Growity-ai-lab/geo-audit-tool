@@ -65,6 +65,8 @@ services:
         sync: false                  # set in dashboard (secret)
       - key: PAGESPEED_API_KEY
         sync: false                  # optional: enables real Core Web Vitals
+      - key: ANTHROPIC_API_KEY
+        sync: false                  # optional: enables AI report commentary
 
   # --- Celery worker (crawl + JS render; processes audits) ----------------
   - type: worker
@@ -94,6 +96,8 @@ services:
       - key: ENABLE_JS_RENDER
         value: "true"
       - key: PAGESPEED_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
         sync: false
 
   # --- Frontend (Next.js) -------------------------------------------------

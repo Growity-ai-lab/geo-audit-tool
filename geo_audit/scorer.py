@@ -38,6 +38,10 @@ class AuditReport:
     # optional raw-vs-rendered comparison ("what AI sees vs what users see").
     spa_suspected: bool = False
     render_comparison: Optional[dict] = None
+    # Set by the orchestration layer: AI-generated narrative commentary
+    # (executive summary + per-category rationale), or None if not generated
+    # (no API key configured, or generation failed).
+    ai_commentary: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -50,6 +54,7 @@ class AuditReport:
             "grade": self.grade,
             "spa_suspected": self.spa_suspected,
             "render_comparison": self.render_comparison,
+            "ai_commentary": self.ai_commentary,
             "categories": [c.to_dict() for c in self.categories],
         }
 

@@ -16,6 +16,7 @@ from geo_audit.fetcher import FallbackFetcher, PlaywrightFetcher, RequestsFetche
 from geo_audit.reporter import render_html
 from geo_audit.scorer import build_render_comparison, looks_like_spa, score
 
+from .ai_commentary import generate_commentary
 from .config import settings
 from .schemas import AuditRequest, AuditResponse
 
@@ -106,6 +107,15 @@ def run_audit(
             logger.warning("compare_render requested but ENABLE_JS_RENDER is off; single run")
         crawl_result, report = _crawl_and_score(req)
 
+    # AI-generated narrative commentary (config-gated, like PSI): runs
+    # whenever an Anthropic key is set, and degrades to None on any failure so
+    # it never breaks the audit.
+    if settings.anthropic_api_key:
+        commentary = generate_commentary(
+            report, settings.anthropic_api_key, settings.ai_commentary_model
+        )
+        report.ai_commentary = commentary.model_dump() if commentary else None
+
     # Render the HTML report and carry it to the persistence layer (stored in
     # the DB). The PDF is produced on demand by the API from this HTML, so no
     # shared filesystem is needed between the worker and the API.
@@ -125,6 +135,7 @@ def run_audit(
         categories=data["categories"],
         spa_suspected=data["spa_suspected"],
         render_comparison=data["render_comparison"],
+        ai_commentary=data["ai_commentary"],
         html_url=f"/audits/{audit_id}/report.html",
         pdf_url=f"/audits/{audit_id}/report.pdf",
         report_html=html,

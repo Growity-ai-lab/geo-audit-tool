@@ -14,3 +14,6 @@ celery[redis]>=5.3.0
 # Pinned to match the mcr.microsoft.com/playwright/python base image so the
 # bundled browsers and the Python package stay in lockstep (no extra download).
 playwright==1.49.1
+# AI-generated report commentary (executive summary + per-category rationale).
+# Config-gated: only used when ANTHROPIC_API_KEY is set.
+anthropic>=0.40.0

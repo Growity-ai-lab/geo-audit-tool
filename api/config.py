@@ -51,6 +51,17 @@ class Settings:
     psi_strategy: str = field(
         default_factory=lambda: os.environ.get("PSI_STRATEGY", "mobile")
     )
+    # AI-generated report commentary (Claude). When a key is set, every audit
+    # gets an executive-summary paragraph + per-category rationale. Empty =>
+    # reports render without commentary (no request made).
+    anthropic_api_key: str = field(
+        default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY", "")
+    )
+    ai_commentary_model: str = field(
+        default_factory=lambda: os.environ.get(
+            "AI_COMMENTARY_MODEL", "claude-haiku-4-5"
+        )
+    )
 
     # --- Auth (A3) -------------------------------------------------------- #
     # JWT signing secret. MUST be set in production; a dev fallback is used
