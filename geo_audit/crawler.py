@@ -6,6 +6,8 @@ llms.txt, and evaluates whether the major generative-AI crawlers are allowed
 to access the page.
 """
 
+import gzip
+import re
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 from urllib.parse import urljoin, urlparse
@@ -71,6 +73,41 @@ def _looks_like_html(text: str) -> bool:
     )
 
 
+_SITEMAP_TAG_RE = re.compile(r"<\s*(urlset|sitemapindex|sitemap|url)\b", re.I)
+_GZIP_MAGIC = b"\x1f\x8b"
+
+
+def _decode_sitemap_body(resp: "requests.Response") -> str:
+    """Decode a sitemap response, handling gzip served without the header.
+
+    Some generators (Ideasoft included) publish a static ``.xml.gz`` file
+    without a ``Content-Encoding: gzip`` header, so ``requests`` never
+    decompresses it and ``resp.text`` is unreadable binary. Detect gzip by
+    its magic bytes (works regardless of the URL/Content-Type) and decompress
+    manually; otherwise fall back to the normal decoded text.
+    """
+    content = resp.content
+    if content[:2] == _GZIP_MAGIC:
+        try:
+            content = gzip.decompress(content)
+        except OSError:
+            return resp.text
+        try:
+            return content.decode(resp.encoding or "utf-8", errors="replace")
+        except (LookupError, TypeError):
+            return content.decode("utf-8", errors="replace")
+    return resp.text
+
+
+def _looks_like_sitemap(body: str) -> bool:
+    """True if the body is (very likely) an XML sitemap or sitemap index.
+
+    Matches case-insensitively and tolerates namespaced/attributed root tags
+    (e.g. ``<urlset xmlns=...>``) instead of requiring an exact substring.
+    """
+    return bool(_SITEMAP_TAG_RE.search(body))
+
+
 @dataclass
 class CrawlResult:
     """Everything gathered from the network for a single audit run."""
@@ -93,6 +130,7 @@ class CrawlResult:
 
     llms_txt_found: bool = False
     llms_txt_url: str = ""
+    llms_txt_content: str = ""
 
     sitemap_found: bool = False
     sitemap_url: str = ""
@@ -280,25 +318,29 @@ class Crawler:
 
         result.llms_txt_found = True
         result.llms_txt_url = llms_url
+        result.llms_txt_content = resp.text
 
     def _check_sitemap(self, result: CrawlResult) -> None:
         # Prefer a Sitemap: directive in robots.txt, else fall back to the
-        # conventional /sitemap.xml location.
+        # conventional locations several sitemap generators (incl. Ideasoft's)
+        # use.
         candidates = []
         for line in result.robots_text.splitlines():
             if line.strip().lower().startswith("sitemap:"):
                 candidates.append(line.split(":", 1)[1].strip())
-        candidates.append(urljoin(result.base_url + "/", "sitemap.xml"))
+        for path in ("sitemap.xml", "sitemap_index.xml", "sitemap-index.xml"):
+            candidates.append(urljoin(result.base_url + "/", path))
 
         for sitemap_url in candidates:
             resp = self._fetch_text(sitemap_url)
-            if resp is not None and resp.status_code == 200 and resp.text.strip():
-                body = resp.text
-                if "<urlset" in body or "<sitemapindex" in body or "<url>" in body:
-                    result.sitemap_found = True
-                    result.sitemap_url = sitemap_url
-                    result.sitemap_url_count = body.count("<loc>")
-                    return
+            if resp is None or resp.status_code != 200 or not resp.content:
+                continue
+            body = _decode_sitemap_body(resp)
+            if body and _looks_like_sitemap(body):
+                result.sitemap_found = True
+                result.sitemap_url = sitemap_url
+                result.sitemap_url_count = len(re.findall(r"<loc>", body, re.I))
+                return
         result.sitemap_found = False
 
 

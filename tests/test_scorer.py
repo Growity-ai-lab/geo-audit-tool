@@ -64,6 +64,12 @@ def test_full_marks_page_scores_100():
         bot_access={"GPTBot": True, "ClaudeBot": True, "PerplexityBot": True},
         llms_txt_found=True,
         llms_txt_url="https://x/llms.txt",
+        llms_txt_content=(
+            "# Acme\n\n## Docs\n\n"
+            "- [Getting started](https://x/docs/start): quickstart guide\n"
+            "- [API reference](https://x/docs/api): full API docs\n"
+            "- [Pricing](https://x/pricing): plans and pricing\n"
+        ),
         sitemap_found=True,
         sitemap_url="https://x/sitemap.xml",
     )

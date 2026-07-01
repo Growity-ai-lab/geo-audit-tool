@@ -109,7 +109,9 @@ def score(crawl_result: "crawler_mod.CrawlResult") -> AuditReport:
     results = {
         "bot_access": crawler_mod.analyze_bot_access(crawl_result),
         "llms_txt": content_analyzer.analyze_llms_txt(
-            crawl_result.llms_txt_found, crawl_result.llms_txt_url
+            crawl_result.llms_txt_found,
+            crawl_result.llms_txt_url,
+            crawl_result.llms_txt_content,
         ),
         "schema": schema_checker.analyze(html),
         "content": content_analyzer.analyze(html),

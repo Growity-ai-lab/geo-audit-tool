@@ -75,8 +75,46 @@ def test_meta_missing_everything():
     assert sum(1 for f in result.findings if f.severity == "fail") >= 2
 
 
-def test_llms_txt_found_and_missing():
-    found = content_analyzer.analyze_llms_txt(True, "https://x/llms.txt")
-    assert found.score == LLMS_MAX_SCORE
+RICH_LLMS_TXT = """# Acme
+
+> Acme sells widgets.
+
+## Docs
+
+- [Getting started](https://acme.com/docs/start): quickstart guide
+- [API reference](https://acme.com/docs/api): full API docs
+- [Pricing](https://acme.com/pricing): plans and pricing
+"""
+
+
+def test_llms_txt_missing():
     missing = content_analyzer.analyze_llms_txt(False)
     assert missing.score == 0.0
+    assert any(f.severity == "fail" for f in missing.findings)
+
+
+def test_llms_txt_rich_content_scores_full():
+    result = content_analyzer.analyze_llms_txt(True, "https://x/llms.txt", RICH_LLMS_TXT)
+    assert result.score == LLMS_MAX_SCORE
+
+
+def test_llms_txt_empty_template_scores_low():
+    # Present and non-empty (e.g. a generator-dropped stub), but no title,
+    # no sections, and — critically — no real content links.
+    result = content_analyzer.analyze_llms_txt(True, "https://x/llms.txt", "\n")
+    # Only the "file exists" baseline is earned; well under full marks.
+    assert result.score < LLMS_MAX_SCORE / 2
+    assert any(f.severity == "fail" for f in result.findings)
+
+
+def test_llms_txt_title_only_no_links():
+    result = content_analyzer.analyze_llms_txt(True, "https://x/llms.txt", "# Acme\n")
+    assert 0 < result.score < LLMS_MAX_SCORE
+    assert any(f.severity == "fail" and "link" in f.message.lower() for f in result.findings)
+
+
+def test_llms_txt_partial_links_scale_score():
+    one_link = "# Acme\n\n## Docs\n\n- [Start](https://acme.com/start): guide\n"
+    result = content_analyzer.analyze_llms_txt(True, "https://x/llms.txt", one_link)
+    full = content_analyzer.analyze_llms_txt(True, "https://x/llms.txt", RICH_LLMS_TXT)
+    assert 0 < result.score < full.score == LLMS_MAX_SCORE

@@ -7,6 +7,7 @@ presence of an llms.txt file (fetched by the crawler).
 User-facing finding text is in Turkish (client-facing reports).
 """
 
+import re
 from typing import List, Optional
 
 from bs4 import BeautifulSoup
@@ -21,6 +22,19 @@ META_MAX_SCORE = 10.0
 W_SINGLE_H1 = 7.0
 W_HAS_H2 = 6.0
 W_ANSWER_FIRST = 7.0
+
+# Sub-weights within llms.txt content-quality scoring (sum == LLMS_MAX_SCORE
+# when fully earned). Per https://llmstxt.org: an H1 title, `## Section`
+# headings, and markdown links to key pages — not just the file's presence.
+W_LLMS_PRESENT = 2.0
+W_LLMS_TITLE = 2.0
+W_LLMS_SECTION = 1.0
+W_LLMS_LINKS = 5.0
+LLMS_LINKS_FOR_FULL_CREDIT = 3
+
+LLMS_TITLE_RE = re.compile(r"^\s*#\s+\S", re.MULTILINE)
+LLMS_SECTION_RE = re.compile(r"^\s*##\s+\S", re.MULTILINE)
+LLMS_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
 
 # Sub-weights within meta signals (sum == META_MAX_SCORE).
 W_TITLE = 3.5
@@ -248,28 +262,80 @@ def analyze_meta(html: str) -> CategoryResult:
     )
 
 
-def analyze_llms_txt(found: bool, llms_url: str = "") -> CategoryResult:
-    """Score the presence of an llms.txt file (fetched by the crawler)."""
-    if found:
-        findings = [
-            Finding(OK, f"llms.txt bulundu: {llms_url or '/llms.txt'}.")
-        ]
-        score = LLMS_MAX_SCORE
+def analyze_llms_txt(found: bool, llms_url: str = "", content: str = "") -> CategoryResult:
+    """Score an llms.txt file by content, not just presence.
+
+    The https://llmstxt.org convention is an H1 title, then ``## Section``
+    headings with markdown links (``- [Title](url): description``) to the
+    site's key pages. A file that exists but carries no real links (e.g. an
+    empty template dropped by a site generator) is barely more useful to an
+    AI crawler than no file at all, so it must not score full marks.
+    """
+    if not found:
+        return CategoryResult(
+            key="llms_txt",
+            name="llms.txt",
+            score=0.0,
+            max_score=LLMS_MAX_SCORE,
+            findings=[
+                Finding(
+                    FAIL,
+                    "Site kök dizininde llms.txt bulunamadı.",
+                    "/llms.txt yayınlayın — en önemli içeriğinizin LLM dostu, derli toplu "
+                    "bir haritası — böylece AI tarayıcılarını kilit sayfalarınıza yönlendirin.",
+                )
+            ],
+        )
+
+    findings = [Finding(OK, f"llms.txt bulundu: {llms_url or '/llms.txt'}.")]
+    score = W_LLMS_PRESENT
+
+    has_title = bool(LLMS_TITLE_RE.search(content))
+    if has_title:
+        score += W_LLMS_TITLE
+        findings.append(Finding(OK, "Başlık (H1) mevcut."))
     else:
-        findings = [
+        findings.append(
+            Finding(
+                WARN,
+                "Dosyada H1 başlık (# Marka/Site Adı) yok.",
+                "İlk satıra `# Marka veya Site Adı` ekleyin.",
+            )
+        )
+
+    has_section = bool(LLMS_SECTION_RE.search(content))
+    if has_section:
+        score += W_LLMS_SECTION
+
+    links = LLMS_LINK_RE.findall(content)
+    link_count = len(links)
+    if link_count > 0:
+        ratio = min(link_count / LLMS_LINKS_FOR_FULL_CREDIT, 1.0)
+        score += W_LLMS_LINKS * ratio
+        findings.append(Finding(OK, f"{link_count} içerik linki bulundu."))
+    else:
+        findings.append(
             Finding(
                 FAIL,
-                "Site kök dizininde llms.txt bulunamadı.",
-                "/llms.txt yayınlayın — en önemli içeriğinizin LLM dostu, derli toplu "
-                "bir haritası — böylece AI tarayıcılarını kilit sayfalarınıza yönlendirin.",
+                "Dosya boş bir şablon — gerçek içerik linki (- [Başlık](url)) yok.",
+                "## Bölüm başlıkları altında en önemli sayfalarınıza (ürün, blog, "
+                "dokümantasyon) `- [Başlık](url): açıklama` formatında link ekleyin.",
             )
-        ]
-        score = 0.0
+        )
+    if link_count > 0 and not has_section:
+        findings.append(
+            Finding(
+                WARN,
+                "Linkler `## Bölüm` başlığı altında gruplanmamış.",
+                "Linkleri anlamlı `## Bölüm` başlıkları (ör. Dokümantasyon, Ürünler) "
+                "altında gruplayın.",
+            )
+        )
 
     return CategoryResult(
         key="llms_txt",
         name="llms.txt",
-        score=score,
+        score=min(score, LLMS_MAX_SCORE),
         max_score=LLMS_MAX_SCORE,
         findings=findings,
     )
