@@ -145,6 +145,27 @@ def test_check_sitemap_found_via_robots_directive(monkeypatch):
     assert result.sitemap_url_count == 2
 
 
+def test_check_sitemap_declared_directive_is_not_reprobed_or_duplicated(monkeypatch):
+    """robots.txt's Sitemap: is authoritative — don't also guess conventional
+    paths, and don't request the same URL twice (real-world regression: a
+    site with Crawl-delay: 30 got hit with 4 requests in ~300ms — including
+    the declared /sitemap.xml twice — and started 429-ing)."""
+    crawler = Crawler()
+    result = _crawl_result(
+        robots_text="User-agent: *\nCrawl-delay: 30\nSitemap: https://x.com/sitemap.xml\n"
+    )
+    calls = []
+
+    def _fake_get(url, **kw):
+        calls.append(url)
+        return _FakeResp(200, content=SITEMAP_XML.encode(), text=SITEMAP_XML)
+
+    monkeypatch.setattr(crawler.session, "get", _fake_get)
+    crawler._check_sitemap(result)
+    assert result.sitemap_found is True
+    assert calls == ["https://x.com/sitemap.xml"]  # exactly one request, no guessing
+
+
 def test_check_sitemap_handles_gzip_without_content_encoding_header(monkeypatch):
     """A static .xml.gz served without a Content-Encoding header must still
     be recognized — requests won't auto-decompress it, so resp.text is raw
