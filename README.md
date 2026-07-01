@@ -243,7 +243,7 @@ The GEO Score is a weighted sum of six categories (100 points total):
 | # | Category                         | Weight | What it checks |
 |---|----------------------------------|:------:|----------------|
 | 1 | **AI Bot Access**                | 25     | Whether `GPTBot`, `ClaudeBot`, `PerplexityBot` are allowed in `robots.txt` |
-| 2 | **llms.txt**                     | 10     | Presence of a root `/llms.txt` file |
+| 2 | **llms.txt**                     | 10     | Presence **and content quality** of `/llms.txt` — H1 title, `## Section` headings, and real `- [Title](url)` links (a present-but-empty template scores low, not full marks) |
 | 3 | **Schema Markup**                | 25     | JSON-LD / schema.org types: `FAQPage`, `Organization`, `HowTo`, `Article` |
 | 4 | **Content Structure**            | 20     | Single H1, H2 hierarchy, answer-first lead paragraph |
 | 5 | **Meta Signals**                 | 10     | `<title>`, meta description, Open Graph tags |
