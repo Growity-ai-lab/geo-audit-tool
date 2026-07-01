@@ -22,22 +22,36 @@ filesystem**.
    - **ANTHROPIC_API_KEY** *(optional)* — enables AI-generated report
      commentary (executive summary + per-category rationale, Claude Haiku 4.5;
      `api` and `worker` — set on both, or leave blank)
+   - **CORS_ORIGINS** (`api`) / **NEXT_PUBLIC_API_BASE_URL** (`frontend`) —
+     leave these **blank** for now; the real URLs aren't known until step 3.
 4. Click **Apply**. Render builds the images and starts everything.
    `JWT_SECRET_KEY` is generated automatically.
 
 ## 3. First run
 - The API runs `alembic upgrade head` on start (creates the schema) and seeds the
   admin from `ADMIN_EMAIL`/`ADMIN_PASSWORD`.
-- Open **`https://geo-audit-frontend.onrender.com`** → log in with the admin
-  credentials → run an audit.
-- API docs: `https://geo-audit-api.onrender.com/docs`.
+- Once all 5 services are live, note the **actual** URLs Render assigned —
+  `https://<service-name>.onrender.com`, but if a name was already taken,
+  Render silently appends a suffix (e.g. `geo-audit-api-msgt.onrender.com`).
+  Check each service's page in the dashboard for its real URL; don't assume
+  the un-suffixed name.
+- Set the two cross-references to those real URLs (dashboard → service →
+  **Environment**):
+  - `geo-audit-api` → env **CORS_ORIGINS** = the frontend's real URL
+  - `geo-audit-frontend` → env **NEXT_PUBLIC_API_BASE_URL** = the API's real URL
+    (then **Manual Deploy → Clear build cache & deploy** on the frontend —
+    it's a Next.js build-time value, a normal redeploy won't pick it up)
+- Open the frontend's real URL → log in with the admin credentials → run an audit.
+- API docs: `<the API's real URL>/docs`.
 
-## 4. If service names get a suffix
-Render URLs are `https://<service-name>.onrender.com`. If a name was taken and
-Render appended a suffix, update two values to the real URLs and redeploy:
-- `geo-audit-api` → env **CORS_ORIGINS** = the frontend's URL
-- `geo-audit-frontend` → env **NEXT_PUBLIC_API_BASE_URL** = the API's URL
-  (then **Manual Deploy → Clear build cache & deploy**, since it's baked at build)
+Both variables are `sync: false` in `render.yaml`, so once set here they
+**persist across future deploys** — a `git push` to `main` will rebuild the
+images but will not reset these back to a placeholder.
+
+## 4. If service names get a suffix later
+Same fix as above: update **CORS_ORIGINS** / **NEXT_PUBLIC_API_BASE_URL** in
+the dashboard to the real URLs (frontend needs a build-cache-cleared redeploy
+afterward). Because both are `sync: false`, this only needs to be done once.
 
 ## Cost / plans
 - **Worker** has no free tier (min **Starter**, ~$7/mo) — it must stay running to

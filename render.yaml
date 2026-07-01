@@ -6,8 +6,12 @@
 #
 # Notes:
 # - Service public URLs follow https://<name>.onrender.com. If a name is taken
-#   and Render appends a suffix, update CORS_ORIGINS / NEXT_PUBLIC_API_BASE_URL
-#   below to match the real URLs.
+#   and Render appends a suffix, set CORS_ORIGINS (api) / NEXT_PUBLIC_API_BASE_URL
+#   (frontend) in the Render dashboard to the real URLs — see DEPLOY.md.
+#   Both are `sync: false` below *on purpose*: they hold a deploy-specific
+#   fact (the actual public hostname) that this file can't know in advance.
+#   If they were a plain `value:`, every git-triggered redeploy would silently
+#   overwrite your dashboard fix back to the (possibly wrong) default here.
 # - Background workers have no free instance type (min: Starter). DB + web +
 #   key value can run on free while evaluating.
 # - region: frankfurt is closest to Türkiye; change if you prefer.
@@ -56,7 +60,7 @@ services:
       - key: ENABLE_JS_RENDER
         value: "true"
       - key: CORS_ORIGINS
-        value: https://geo-audit-frontend.onrender.com
+        sync: false                  # set in dashboard to the frontend's real URL
       - key: JWT_SECRET_KEY
         generateValue: true          # Render generates a strong secret
       - key: ADMIN_EMAIL
@@ -111,6 +115,7 @@ services:
     autoDeploy: true
     envVars:
       # Baked into the build as a Docker ARG (Render passes env vars as build
-      # args). Must be the API's public URL.
+      # args). Must be the API's real public URL — set in dashboard (sync:
+      # false so a redeploy never reverts it; see the note at the top).
       - key: NEXT_PUBLIC_API_BASE_URL
-        value: https://geo-audit-api.onrender.com
+        sync: false
