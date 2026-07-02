@@ -6,10 +6,13 @@ shape lives in one place.
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
+
+from geo_audit.overrides import apply_overrides
+from geo_audit.scorer import AuditReport
 
 from . import models
 from .schemas import AuditRequest, AuditResponse, ClientCreate, ClientUpdate
@@ -113,16 +116,35 @@ def apply_result(
     return audit
 
 
+def adjusted_report(audit: models.Audit) -> Optional[AuditReport]:
+    """Reconstruct the audit's report with any confirmed overrides applied.
+
+    ``audit.report_json`` (the automated baseline) is never mutated — this
+    re-applies ``audit.overrides`` fresh on every call, so un-checking an
+    override is just removing its key, not needing a stored "original" to
+    revert to. Returns None for a queued/running/errored audit (no report yet).
+    """
+    if not audit.report_json:
+        return None
+    report = AuditReport.from_dict(dict(audit.report_json))
+    return apply_overrides(report, audit.overrides or {})
+
+
 def to_response(audit: models.Audit) -> AuditResponse:
     """Build an AuditResponse from a row.
 
-    For a finished audit the stored ``report_json`` is the source of truth; for
-    a queued/running one (no report yet) a minimal status view is returned.
+    For a finished audit the stored ``report_json`` is the source of truth
+    (with overrides applied on top); for a queued/running one (no report yet)
+    a minimal status view is returned.
     """
     if audit.report_json:
         data = dict(audit.report_json)
+        report = adjusted_report(audit)
+        if report is not None:
+            data.update(report.to_dict())
         # The row's status is authoritative (report_json was written at done).
         data["status"] = audit.status
+        data["overrides"] = audit.overrides or {}
         return AuditResponse.model_validate(data)
     return AuditResponse(
         audit_id=audit.id,
@@ -134,6 +156,24 @@ def to_response(audit: models.Audit) -> AuditResponse:
         created_at=audit.created_at,
         completed_at=audit.completed_at,
     )
+
+
+def update_overrides(
+    db: Session, audit: models.Audit, new_overrides: Dict[str, bool]
+) -> models.Audit:
+    """Merge new override values into the audit and refresh its cached score.
+
+    ``geo_score``/``grade`` columns (used by the list endpoint) are kept in
+    sync with the overridden result so both views agree.
+    """
+    audit.overrides = {**(audit.overrides or {}), **new_overrides}
+    report = adjusted_report(audit)
+    if report is not None:
+        audit.geo_score = round(report.total_score, 1)
+        audit.grade = report.grade
+    db.commit()
+    db.refresh(audit)
+    return audit
 
 
 def list_audits(

@@ -78,6 +78,10 @@ def _looks_like_html(text: str) -> bool:
 
 _SITEMAP_TAG_RE = re.compile(r"<\s*(urlset|sitemapindex|sitemap|url)\b", re.I)
 _GZIP_MAGIC = b"\x1f\x8b"
+# A clean "doesn't exist" is a 404 (or an HTML soft-404 for sidecar files);
+# these codes mean a WAF/rate-limiter intervened before that determination
+# could even be made — see the ``*_ambiguous`` fields on CrawlResult.
+_AMBIGUOUS_STATUSES = (403, 429, 503)
 
 
 def _decode_sitemap_body(resp: "requests.Response") -> str:
@@ -130,10 +134,17 @@ class CrawlResult:
     robots_found: bool = False
     robots_text: str = ""
     bot_access: Dict[str, bool] = field(default_factory=dict)
+    # True when robots.txt couldn't be fetched due to a 403/429/503 (WAF/
+    # rate-limit) rather than a clean absence — bot_access still defaults to
+    # "all allowed" in this case, which may be optimistic if some bot really
+    # is disallowed and we simply couldn't check.
+    robots_ambiguous: bool = False
 
     llms_txt_found: bool = False
     llms_txt_url: str = ""
     llms_txt_content: str = ""
+    # Same signal as sitemap_ambiguous/robots_ambiguous, for llms.txt.
+    llms_txt_ambiguous: bool = False
 
     sitemap_found: bool = False
     sitemap_url: str = ""
@@ -302,6 +313,8 @@ class Crawler:
             # No robots.txt => nothing is disallowed; all bots may crawl.
             result.robots_found = False
             result.bot_access = {bot: True for bot in AI_BOTS}
+            if resp is not None and resp.status_code in _AMBIGUOUS_STATUSES:
+                result.robots_ambiguous = True
 
     @staticmethod
     def _parse_bot_access(robots_text: str, target_url: str) -> Dict[str, bool]:
@@ -321,6 +334,8 @@ class Crawler:
         llms_url = urljoin(result.base_url + "/", "llms.txt")
         resp = self._fetch_text(llms_url, context="llms.txt")
         if resp is None or resp.status_code != 200 or not resp.text.strip():
+            if resp is not None and resp.status_code in _AMBIGUOUS_STATUSES:
+                result.llms_txt_ambiguous = True
             return
 
         content_type = resp.headers.get("Content-Type", "").lower()
@@ -357,10 +372,7 @@ class Crawler:
             if resp is None:
                 continue  # already logged by _fetch_text
             if resp.status_code != 200 or not resp.content:
-                if resp.status_code in (403, 429, 503):
-                    # A clean "doesn't exist" is a 404; these codes mean a
-                    # WAF/rate-limiter intervened — the sitemap may well
-                    # exist, we just couldn't confirm it this time.
+                if resp.status_code in _AMBIGUOUS_STATUSES:
                     result.sitemap_ambiguous = True
                 logger.warning(
                     "sitemap candidate %s returned HTTP %s (%d bytes)",
@@ -400,7 +412,18 @@ def analyze_bot_access(result: CrawlResult) -> CategoryResult:
     per_bot = BOT_MAX_SCORE / len(AI_BOTS)
     score = per_bot * len(allowed)
 
-    if not result.robots_found:
+    if not result.robots_found and result.robots_ambiguous:
+        findings.append(
+            Finding(
+                WARN,
+                "robots.txt erişimi doğrulanamadı — istek engellenmiş/kısıtlanmış "
+                "olabilir. Bir veya daha fazla AI botu aslında engelleniyor olabilir; "
+                "varsayılan olarak tümüne izin verildiği kabul edildi.",
+                "Farklı bir ağdan (veya biraz sonra) robots.txt'yi manuel kontrol edin.",
+                override_key="robots_blocked",
+            )
+        )
+    elif not result.robots_found:
         findings.append(
             Finding(
                 OK,
@@ -524,6 +547,7 @@ def analyze_page_speed(result: CrawlResult) -> CategoryResult:
                 "olabilir (bu denemede beklenmeyen bir yanıt alındı).",
                 "Farklı bir ağdan (veya biraz sonra) tekrar deneyin; sitenizin WAF/"
                 "bot-koruması otomatik denetim araçlarını geçici olarak kısıtlıyor olabilir.",
+                override_key="sitemap_exists",
             )
         )
     else:
@@ -583,6 +607,7 @@ def _analyze_page_speed_psi(result: CrawlResult) -> CategoryResult:
                 "olabilir (bu denemede beklenmeyen bir yanıt alındı).",
                 "Farklı bir ağdan (veya biraz sonra) tekrar deneyin; sitenizin WAF/"
                 "bot-koruması otomatik denetim araçlarını geçici olarak kısıtlıyor olabilir.",
+                override_key="sitemap_exists",
             )
         )
     else:

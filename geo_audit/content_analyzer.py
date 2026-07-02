@@ -262,7 +262,9 @@ def analyze_meta(html: str) -> CategoryResult:
     )
 
 
-def analyze_llms_txt(found: bool, llms_url: str = "", content: str = "") -> CategoryResult:
+def analyze_llms_txt(
+    found: bool, llms_url: str = "", content: str = "", ambiguous: bool = False
+) -> CategoryResult:
     """Score an llms.txt file by content, not just presence.
 
     The https://llmstxt.org convention is an H1 title, then ``## Section``
@@ -270,8 +272,28 @@ def analyze_llms_txt(found: bool, llms_url: str = "", content: str = "") -> Cate
     site's key pages. A file that exists but carries no real links (e.g. an
     empty template dropped by a site generator) is barely more useful to an
     AI crawler than no file at all, so it must not score full marks.
+
+    ``ambiguous`` (only meaningful when ``found`` is False) marks that the
+    fetch was blocked/rate-limited (403/429/503) rather than confirming the
+    file's absence — a clean 404 stays a firm "not found".
     """
     if not found:
+        if ambiguous:
+            return CategoryResult(
+                key="llms_txt",
+                name="llms.txt",
+                score=0.0,
+                max_score=LLMS_MAX_SCORE,
+                findings=[
+                    Finding(
+                        WARN,
+                        "llms.txt erişimi doğrulanamadı — istek engellenmiş/"
+                        "kısıtlanmış olabilir (bu denemede beklenmeyen bir yanıt alındı).",
+                        "Farklı bir ağdan (veya biraz sonra) tekrar deneyin.",
+                        override_key="llms_txt_exists",
+                    )
+                ],
+            )
         return CategoryResult(
             key="llms_txt",
             name="llms.txt",

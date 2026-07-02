@@ -236,6 +236,26 @@ export ANTHROPIC_API_KEY=...              # console.anthropic.com
 export AI_COMMENTARY_MODEL=claude-haiku-4-5   # varsayılan
 ```
 
+### Belirsiz bulgular için manuel onay
+
+Sitemap, robots.txt ve llms.txt kontrolleri hedef sitenin WAF/rate-limit'i
+yüzünden yanlış negatif verebilir (istek engellenir, dosyanın kendisi değil).
+Bu durumda otomatik skor "yok" yerine **"doğrulanamadı"** der ve ilgili bulgu
+`override_key` taşır; arayüzde bu bulgunun altında bir **manuel onay
+checkbox'ı** çıkar. Ekip üyesi URL'yi kendisi kontrol edip işaretlerse,
+skor anında güncellenir (`PATCH /audits/{id}/overrides`):
+
+| override_key | Anlamı | İşaretlenirse |
+|---|---|---|
+| `sitemap_exists` | Sitemap gerçekten var | `page_speed` kategorisine kalan yarım puan eklenir |
+| `llms_txt_exists` | llms.txt gerçekten var | `llms_txt` kategorisine varlık puanı eklenir (içerik kalitesi otomatik değerlendirilemez) |
+| `robots_blocked` | robots.txt aslında bir AI botunu engelliyor | `bot_access`'ten bir bot payı düşülür (varsayılan iyimser tahminin tersi yönde) |
+
+Otomatik temel sonuç (`report_json`/`report_html`) hiçbir zaman değişmez —
+override'lar ayrı bir alanda (`audits.overrides`) saklanır ve her serve'de
+üzerine uygulanır, böylece bir checkbox'ı geri almak sadece anahtarı
+kaldırmak kadar basittir.
+
 ## Scoring model
 
 The GEO Score is a weighted sum of six categories (100 points total):

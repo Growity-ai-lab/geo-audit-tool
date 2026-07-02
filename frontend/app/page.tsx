@@ -9,6 +9,8 @@ import {
   getToken,
   login,
   runAudit,
+  updateOverrides,
+  type AuditFinding,
   type AuditResult,
   type CurrentUser,
   type RenderComparison,
@@ -268,6 +270,7 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
           pdfUrl={pdfUrl}
           htmlUrl={htmlUrl}
           requestedJs={renderJs}
+          onUpdate={setResult}
         />
       )}
     </main>
@@ -279,11 +282,13 @@ function ResultView({
   pdfUrl,
   htmlUrl,
   requestedJs,
+  onUpdate,
 }: {
   result: AuditResult;
   pdfUrl: string | null;
   htmlUrl: string | null;
   requestedJs: boolean;
+  onUpdate: (r: AuditResult) => void;
 }) {
   if (!result.reachable) {
     return (
@@ -343,6 +348,8 @@ function ResultView({
         result.spa_suspected && <SpaWarning />
       )}
 
+      <OverridesPanel result={result} onUpdate={onUpdate} />
+
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         {pdfUrl && (
           <a href={pdfUrl} target="_blank" rel="noreferrer" style={linkButton("#2563eb")}>
@@ -397,6 +404,90 @@ function ResultView({
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Findings the crawler could only mark "ambiguous" (a WAF/rate-limit blocked
+ * verification, e.g. sitemap check hitting a Cloudflare block) carry an
+ * override_key. This panel lets a team member confirm what they found by
+ * checking the URL by hand, updating the score immediately.
+ */
+function OverridesPanel({
+  result,
+  onUpdate,
+}: {
+  result: AuditResult;
+  onUpdate: (r: AuditResult) => void;
+}) {
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const overridable = result.categories.flatMap((cat) =>
+    cat.findings
+      .filter((f): f is AuditFinding & { override_key: string } => !!f.override_key)
+      .map((f) => ({ category: cat.name, finding: f })),
+  );
+
+  if (overridable.length === 0) return null;
+
+  async function onToggle(key: string, checked: boolean) {
+    setPending(key);
+    setError(null);
+    try {
+      const updated = await updateOverrides(result.audit_id, { [key]: checked });
+      onUpdate(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Düzeltme kaydedilemedi.");
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <div style={{ ...cardStyle, borderColor: "#b45309" }}>
+      <h2 style={{ marginTop: 0, fontSize: 18 }}>Belirsiz Bulgular — Manuel Onay</h2>
+      <p style={{ fontSize: 13, color: "#9fb0c7", marginTop: 0 }}>
+        Bu kontroller otomatik olarak doğrulanamadı (istek engellenmiş/kısıtlanmış
+        olabilir). URL&apos;yi kendiniz kontrol ettiyseniz işaretleyin; skor buna
+        göre güncellenir.
+      </p>
+      <div style={{ display: "grid", gap: 10 }}>
+        {overridable.map(({ category, finding }) => {
+          const key = finding.override_key;
+          const checked = result.overrides[key] === true;
+          return (
+            <label
+              key={key}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 10,
+                padding: "8px 0",
+                borderTop: "1px solid #1f2c47",
+                cursor: pending ? "default" : "pointer",
+                opacity: pending && pending !== key ? 0.6 : 1,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={pending !== null}
+                onChange={(e) => onToggle(key, e.target.checked)}
+                style={{ marginTop: 3 }}
+              />
+              <div>
+                <div style={{ fontSize: 13, color: "#9fb0c7" }}>{category}</div>
+                <div style={{ fontSize: 14 }}>{finding.message}</div>
+              </div>
+            </label>
+          );
+        })}
+      </div>
+      {error && (
+        <div style={{ color: "#fecaca", fontSize: 13, marginTop: 10 }}>{error}</div>
+      )}
     </div>
   );
 }

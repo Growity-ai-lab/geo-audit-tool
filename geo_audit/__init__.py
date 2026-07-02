@@ -6,7 +6,7 @@ findings with actionable recommendations.
 """
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 __version__ = "0.1.0"
 
@@ -23,6 +23,20 @@ class Finding:
     severity: str  # OK | WARN | FAIL
     message: str
     recommendation: str = ""
+    # Set only on findings where automated detection was inconclusive (a WAF/
+    # rate-limit blocked verification rather than confirming absence). Lets
+    # the web layer offer a manual "I checked, it's actually X" override,
+    # keyed by this string (see geo_audit/overrides.py for the known keys).
+    override_key: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Finding":
+        return cls(
+            severity=data["severity"],
+            message=data["message"],
+            recommendation=data.get("recommendation", ""),
+            override_key=data.get("override_key"),
+        )
 
 
 @dataclass
@@ -57,7 +71,19 @@ class CategoryResult:
                     "severity": f.severity,
                     "message": f.message,
                     "recommendation": f.recommendation,
+                    "override_key": f.override_key,
                 }
                 for f in self.findings
             ],
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CategoryResult":
+        return cls(
+            key=data["key"],
+            name=data["name"],
+            score=data["score"],
+            max_score=data["max_score"],
+            findings=[Finding.from_dict(f) for f in data.get("findings", [])],
+            metrics=data.get("metrics") or {},
+        )

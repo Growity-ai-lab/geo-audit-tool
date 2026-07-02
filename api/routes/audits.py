@@ -6,13 +6,18 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
+from geo_audit.overrides import OVERRIDABLE_KEYS
+from geo_audit.reporter import render_html
+
 from .. import auth, models, pdf as pdf_mod, repository, tasks
+from ..config import settings
 from ..db import get_db
 from ..schemas import (
     AuditListResponse,
     AuditRequest,
     AuditResponse,
     AuditSummary,
+    OverrideUpdate,
 )
 
 router = APIRouter(tags=["audits"])
@@ -104,6 +109,53 @@ def get_audit(
     return repository.to_response(audit)
 
 
+@router.patch("/audits/{audit_id}/overrides", response_model=AuditResponse)
+def update_overrides(
+    audit_id: str,
+    body: OverrideUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+) -> AuditResponse:
+    """Confirm (or retract) a manual correction for an ambiguous finding.
+
+    Only findings the crawler flagged with an ``override_key`` (WAF/rate-
+    limit blocked automated verification) are affected — see
+    ``geo_audit/overrides.py``. Unknown keys are rejected so a frontend typo
+    doesn't silently no-op.
+    """
+    unknown = set(body.overrides) - set(OVERRIDABLE_KEYS)
+    if unknown:
+        raise HTTPException(
+            status_code=422, detail=f"unknown override key(s): {sorted(unknown)}"
+        )
+
+    audit = repository.get_audit(db, audit_id)
+    if audit is None:
+        raise HTTPException(status_code=404, detail="audit not found")
+    if not audit.report_json:
+        raise HTTPException(
+            status_code=409, detail="audit has no report yet (still queued/running)"
+        )
+
+    audit = repository.update_overrides(db, audit, body.overrides)
+    return repository.to_response(audit)
+
+
+def _render_artifact_html(audit: models.Audit, db: Session) -> str:
+    """The stored HTML if no overrides are active (fast path), else a fresh
+    render reflecting the current overrides — the artifact must match what
+    ``GET /audits/{id}`` reports."""
+    if not audit.overrides:
+        return audit.report_html
+
+    report = repository.adjusted_report(audit)
+    client_name = ""
+    if audit.client_id:
+        client = repository.get_client(db, audit.client_id)
+        client_name = client.name if client else ""
+    return render_html(report, brand=settings.default_brand, client=client_name)
+
+
 @router.get("/audits/{audit_id}/{name}")
 def get_artifact(
     audit_id: str, name: str, db: Session = Depends(get_db)
@@ -122,13 +174,13 @@ def get_artifact(
     if audit is None or not audit.report_html:
         raise HTTPException(status_code=404, detail="artifact not found")
 
+    html = _render_artifact_html(audit, db)
+
     if name == "report.html":
-        return Response(
-            content=audit.report_html, media_type="text/html; charset=utf-8"
-        )
+        return Response(content=html, media_type="text/html; charset=utf-8")
 
     try:
-        pdf_bytes = pdf_mod.html_to_pdf(audit.report_html)
+        pdf_bytes = pdf_mod.html_to_pdf(html)
     except Exception as exc:  # noqa: BLE001 - browser may be unavailable
         raise HTTPException(
             status_code=503, detail=f"PDF generation unavailable: {exc}"

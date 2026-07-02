@@ -83,3 +83,15 @@ def test_to_dict_round_trips_keys():
     d = score(cr).to_dict()
     assert "geo_score" in d and "categories" in d
     assert isinstance(d["categories"], list)
+
+
+def test_from_dict_round_trips_to_dict():
+    cr = CrawlResult(
+        url="https://x", final_url="https://x", ok=True, html="<html></html>",
+        status_code=200,
+    )
+    report = score(cr)
+    rebuilt = AuditReport.from_dict(report.to_dict())
+    assert rebuilt.to_dict() == report.to_dict()
+    assert rebuilt.total_score == report.total_score
+    assert [c.key for c in rebuilt.categories] == [c.key for c in report.categories]

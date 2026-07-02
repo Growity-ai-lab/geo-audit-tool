@@ -74,6 +74,9 @@ export interface AuditFinding {
   severity: "ok" | "warn" | "fail";
   message: string;
   recommendation: string;
+  // Set only when automated detection was inconclusive (a WAF/rate-limit
+  // blocked verification) — the UI offers a manual-confirm checkbox for it.
+  override_key: string | null;
 }
 
 export interface AuditCategory {
@@ -117,6 +120,9 @@ export interface AuditResult {
   categories: AuditCategory[];
   spa_suspected: boolean;
   render_comparison: RenderComparison | null;
+  // Manually confirmed corrections for ambiguous findings, keyed by
+  // AuditFinding.override_key (e.g. { sitemap_exists: true }).
+  overrides: Record<string, boolean>;
   html_url: string | null;
   pdf_url: string | null;
   status: AuditStatus;
@@ -143,6 +149,28 @@ export async function getAudit(auditId: string): Promise<AuditResult> {
     throw new AuthError("Oturum süresi doldu. Lütfen tekrar giriş yapın.");
   }
   if (!res.ok) throw new Error(`Audit alınamadı (HTTP ${res.status}).`);
+  return (await res.json()) as AuditResult;
+}
+
+/**
+ * Confirm (or retract) a manual correction for an ambiguous finding — e.g.
+ * `{ sitemap_exists: true }` after checking the URL by hand. Returns the
+ * audit with the override applied (score/grade/findings already updated).
+ */
+export async function updateOverrides(
+  auditId: string,
+  overrides: Record<string, boolean>,
+): Promise<AuditResult> {
+  const res = await fetch(`${API_BASE_URL}/audits/${auditId}/overrides`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ overrides }),
+  });
+  if (res.status === 401) {
+    clearToken();
+    throw new AuthError("Oturum süresi doldu. Lütfen tekrar giriş yapın.");
+  }
+  if (!res.ok) throw new Error(`Düzeltme kaydedilemedi (HTTP ${res.status}).`);
   return (await res.json()) as AuditResult;
 }
 

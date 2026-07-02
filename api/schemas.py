@@ -1,7 +1,7 @@
 """Pydantic request/response models for the API."""
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,6 +35,11 @@ class CategoryFinding(BaseModel):
     severity: str
     message: str
     recommendation: str = ""
+    # Set only on findings where automated detection was inconclusive (a WAF/
+    # rate-limit blocked verification). The frontend renders a manual-override
+    # checkbox for any finding carrying one of these keys — see
+    # geo_audit/overrides.py for the known keys and their effect.
+    override_key: Optional[str] = None
 
 
 class CategorySummary(BaseModel):
@@ -69,6 +74,9 @@ class AuditResponse(BaseModel):
     # AI-generated narrative commentary (executive summary + per-category
     # rationale), or None if ANTHROPIC_API_KEY isn't set / generation failed.
     ai_commentary: Optional[dict] = None
+    # Manually confirmed corrections for ambiguous findings (see
+    # CategoryFinding.override_key), applied on top of the automated result.
+    overrides: Dict[str, bool] = {}
     # Relative artifact paths (frontend prefixes with the API base URL).
     html_url: Optional[str] = None
     pdf_url: Optional[str] = None
@@ -82,6 +90,17 @@ class AuditResponse(BaseModel):
     status: str = "done"
     created_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+
+
+class OverrideUpdate(BaseModel):
+    """Payload for ``PATCH /audits/{id}/overrides``.
+
+    Partial update: keys present here are merged into the audit's existing
+    overrides (an omitted key keeps its current value; it does not reset).
+    Keys must be one of geo_audit.overrides.OVERRIDABLE_KEYS.
+    """
+
+    overrides: Dict[str, bool]
 
 
 class AuditSummary(BaseModel):
