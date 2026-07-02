@@ -118,3 +118,46 @@ def test_crawler_with_fallback_records_requests_on_degrade():
     result = crawler.crawl("example.com")
     assert result.ok is True
     assert result.rendered_with == "requests"
+
+
+def test_decode_response_sniffs_encoding_when_header_omits_charset():
+    """UTF-8 page with no charset in the HTTP header (only <meta>) must not be
+    decoded as ISO-8859-1 — requests' default — which would mojibake Turkish."""
+    from geo_audit.fetcher import _decode_response
+
+    class _FakeResp:
+        def __init__(self):
+            self.headers = {"content-type": "text/html"}  # no charset
+            self._bytes = "Ton Balığı Konservesi".encode("utf-8")
+            self.encoding = "ISO-8859-1"  # requests' text/* default
+
+        @property
+        def apparent_encoding(self):
+            return "utf-8"
+
+        @property
+        def text(self):
+            return self._bytes.decode(self.encoding, errors="replace")
+
+    resp = _FakeResp()
+    out = _decode_response(resp)
+    assert "Ton Balığı Konservesi" in out
+
+
+def test_decode_response_respects_explicit_header_charset():
+    from geo_audit.fetcher import _decode_response
+
+    class _FakeResp:
+        def __init__(self):
+            self.headers = {"content-type": "text/html; charset=utf-8"}
+            self.encoding = "utf-8"
+
+        @property
+        def apparent_encoding(self):
+            return "windows-1254"  # should be ignored — header wins
+
+        @property
+        def text(self):
+            return "Balığı"
+
+    assert _decode_response(_FakeResp()) == "Balığı"

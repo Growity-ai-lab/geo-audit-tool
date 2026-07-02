@@ -42,6 +42,10 @@ class AuditReport:
     # (executive summary + per-category rationale), or None if not generated
     # (no API key configured, or generation failed).
     ai_commentary: Optional[dict] = None
+    # Set by the orchestration layer: page-type/keyword "Hedefleme" overlay,
+    # a separate targeted analysis that does NOT affect the GEO score. None
+    # when no page type or keyword was supplied.
+    targeting: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -55,6 +59,7 @@ class AuditReport:
             "spa_suspected": self.spa_suspected,
             "render_comparison": self.render_comparison,
             "ai_commentary": self.ai_commentary,
+            "targeting": self.targeting,
             "categories": [c.to_dict() for c in self.categories],
         }
 
@@ -75,6 +80,7 @@ class AuditReport:
             spa_suspected=data.get("spa_suspected", False),
             render_comparison=data.get("render_comparison"),
             ai_commentary=data.get("ai_commentary"),
+            targeting=data.get("targeting"),
         )
 
 

@@ -31,6 +31,8 @@ def run_audit_task(
     brand: str | None,
     render_js: bool,
     compare_render: bool = False,
+    page_type: str = "generic",
+    target_keyword: str = "",
 ) -> str:
     """Process a queued audit. Returns the terminal status ("done"/"error")."""
     # Use db.SessionLocal() (attribute access) so tests can rebind it.
@@ -51,6 +53,8 @@ def run_audit_task(
                 brand=brand,
                 render_js=render_js,
                 compare_render=compare_render,
+                page_type=page_type,
+                target_keyword=target_keyword,
             )
             response = service.run_audit(
                 req, audit_id=audit_id, client_name=client_name

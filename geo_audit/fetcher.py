@@ -35,6 +35,23 @@ DEFAULT_UA = (
 )
 
 
+def _decode_response(resp: "requests.Response") -> str:
+    """Decode a response body, sniffing the encoding when the header omits it.
+
+    ``requests`` defaults to ISO-8859-1 for ``text/*`` when the HTTP header
+    carries no charset (per RFC 2616) — which mojibakes UTF-8 pages that
+    declare their charset only via an HTML ``<meta>`` tag (common on Turkish
+    sites). When the header has no charset, prefer the content-sniffed
+    encoding so on-page text (title, headings, keywords) reads correctly.
+    """
+    content_type = resp.headers.get("content-type", "").lower()
+    if "charset=" not in content_type:
+        sniffed = resp.apparent_encoding
+        if sniffed:
+            resp.encoding = sniffed
+    return resp.text or ""
+
+
 @dataclass
 class FetchResponse:
     """Normalised result of fetching a single URL.
@@ -97,7 +114,7 @@ class RequestsFetcher:
             status_code=resp.status_code,
             ok=resp.ok,
             headers={k.lower(): v for k, v in resp.headers.items()},
-            text=resp.text or "",
+            text=_decode_response(resp),
             content_length=len(resp.content or b""),
             elapsed_ms=elapsed_ms,
             rendered_with="requests",

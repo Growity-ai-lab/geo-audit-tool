@@ -58,3 +58,24 @@ def test_list_report_escapes_client_input():
     )
     assert "<script>alert(1)</script>" not in out
     assert "&lt;script&gt;" in out
+
+
+def test_targeting_block_rendered_when_present():
+    from geo_audit.targeting import analyze_targeting
+
+    report = _report()
+    report.targeting = analyze_targeting(
+        '<html><head><title>Ton</title></head><body><h1>Ton</h1></body></html>',
+        "product",
+        "ton",
+    ).to_dict()
+    out = render_html(report)
+    assert "Hedefleme" in out
+    assert "Hedef kelime" in out
+    assert "Product" in out  # expected-schema chip for a product page
+
+
+def test_targeting_absent_renders_nothing():
+    out = render_html(_report())  # no targeting set
+    assert "card targeting" not in out  # the card section isn't emitted
+    assert "Hedef kelime" not in out
