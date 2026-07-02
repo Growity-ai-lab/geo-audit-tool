@@ -8,10 +8,16 @@ moving status queued → running → done (or → error).
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
+
+from geo_audit.aggregate import aggregate_reports
+from geo_audit.reporter import render_list_html
+from geo_audit.scorer import AuditReport
 
 from . import db, models, repository, service
 from .celery_app import celery_app
+from .config import settings
 from .schemas import AuditRequest
 
 logger = logging.getLogger("geo_audit.api.tasks")
@@ -64,5 +70,101 @@ def run_audit_task(
                 audit.completed_at = datetime.now(timezone.utc)
                 session.commit()
             return "error"
+    finally:
+        session.close()
+
+
+@celery_app.task(name="api.tasks.run_batch")
+def run_batch_task(
+    parent_id: str,
+    urls: list[str],
+    client_name: str | None,
+    brand: str | None,
+    render_js: bool,
+) -> str:
+    """Process a queued URL-list audit: run each URL as a child page audit,
+    then aggregate them into the parent and render the combined report.
+
+    Pages run sequentially in this single task (a handful of URLs, and it
+    keeps us polite to a single target). Each page is a normal, individually
+    downloadable audit; the parent holds the average + strategy report."""
+    session = db.SessionLocal()
+    try:
+        parent = session.get(models.Audit, parent_id)
+        if parent is None:
+            logger.warning("run_batch_task: parent %s not found", parent_id)
+            return "error"
+
+        parent.status = "running"
+        session.commit()
+
+        reports: list[AuditReport] = []
+        for url in urls:
+            child_id = uuid.uuid4().hex
+            child = models.Audit(
+                id=child_id,
+                parent_audit_id=parent_id,
+                client_id=parent.client_id,
+                user_id=parent.user_id,
+                url=url,
+                scope="page",
+                status="queued",
+                render_js=render_js,
+            )
+            session.add(child)
+            session.commit()
+            try:
+                req = AuditRequest(
+                    url=url, client=client_name or "", brand=brand, render_js=render_js
+                )
+                response = service.run_audit(
+                    req, audit_id=child_id, client_name=client_name
+                )
+                response.client_id = parent.client_id
+                response.user_id = parent.user_id
+                repository.apply_result(session, child, response)
+                reports.append(AuditReport.from_dict(child.report_json))
+            except Exception:  # noqa: BLE001 - one bad URL shouldn't sink the batch
+                logger.exception("batch page failed: %s (parent %s)", url, parent_id)
+                session.rollback()
+                child = session.get(models.Audit, child_id)
+                if child is not None:
+                    child.status = "error"
+                    child.error = "audit failed"
+                    child.reachable = False
+                    child.completed_at = datetime.now(timezone.utc)
+                    session.commit()
+                reports.append(
+                    AuditReport(
+                        url=url, final_url=url, reachable=False, error="audit failed",
+                        total_score=0.0, max_score=100.0, grade="F", categories=[],
+                    )
+                )
+
+        aggregate = aggregate_reports(reports)
+        brand_name = brand or settings.default_brand
+        parent.report_json = aggregate.to_dict()
+        parent.report_html = render_list_html(
+            aggregate, brand=brand_name, client=client_name or ""
+        )
+        parent.geo_score = round(aggregate.avg_score, 1)
+        parent.grade = aggregate.grade
+        parent.reachable = aggregate.reachable_count > 0
+        parent.html_url = f"/audits/{parent_id}/report.html"
+        parent.pdf_url = f"/audits/{parent_id}/report.pdf"
+        parent.status = "done"
+        parent.completed_at = datetime.now(timezone.utc)
+        session.commit()
+        return "done"
+    except Exception as exc:  # noqa: BLE001 - record failure, don't crash worker
+        logger.exception("run_batch_task failed for %s", parent_id)
+        session.rollback()
+        parent = session.get(models.Audit, parent_id)
+        if parent is not None:
+            parent.status = "error"
+            parent.error = str(exc)
+            parent.completed_at = datetime.now(timezone.utc)
+            session.commit()
+        return "error"
     finally:
         session.close()

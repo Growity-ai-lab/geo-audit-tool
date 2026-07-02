@@ -15,7 +15,15 @@ from geo_audit.overrides import apply_overrides
 from geo_audit.scorer import AuditReport
 
 from . import models
-from .schemas import AuditRequest, AuditResponse, ClientCreate, ClientUpdate
+from .schemas import (
+    AuditRequest,
+    AuditResponse,
+    BatchAuditRequest,
+    BatchAuditResponse,
+    ClientCreate,
+    ClientUpdate,
+    PageSummary,
+)
 
 
 # --- Clients -------------------------------------------------------------- #
@@ -76,6 +84,67 @@ def create_queued_audit(
     db.commit()
     db.refresh(audit)
     return audit
+
+
+def create_batch_parent(
+    db: Session, *, parent_id: str, req: BatchAuditRequest, user_id: Optional[str]
+) -> models.Audit:
+    """Create the placeholder 'list' audit that its page audits hang off."""
+    parent = models.Audit(
+        id=parent_id,
+        client_id=req.client_id,
+        user_id=user_id,
+        url=f"{len(req.urls)} URL",  # human label; children hold real URLs
+        scope="list",
+        status="queued",
+        render_js=req.render_js,
+    )
+    db.add(parent)
+    db.commit()
+    db.refresh(parent)
+    return parent
+
+
+def to_batch_response(parent: models.Audit) -> BatchAuditResponse:
+    """Build a BatchAuditResponse from a list audit and its page children.
+
+    The aggregate lives in ``parent.report_json`` (written when the batch
+    finishes); per-page rows come from the child audits so each links to its
+    own report artifacts.
+    """
+    pages = [
+        PageSummary(
+            audit_id=c.id,
+            url=c.url,
+            final_url=c.final_url,
+            reachable=bool(c.reachable),
+            geo_score=c.geo_score,
+            grade=c.grade,
+            status=c.status,
+            error=c.error,
+            html_url=c.html_url,
+            pdf_url=c.pdf_url,
+        )
+        for c in parent.children
+    ]
+    agg = parent.report_json or {}
+    return BatchAuditResponse(
+        audit_id=parent.id,
+        status=parent.status,
+        url_count=agg.get("url_count", len(pages)),
+        reachable_count=agg.get("reachable_count", 0),
+        avg_score=agg.get("avg_score"),
+        grade=agg.get("grade"),
+        category_averages=agg.get("category_averages", []),
+        top_gaps=agg.get("top_gaps", []),
+        pages=pages,
+        html_url=parent.html_url,
+        pdf_url=parent.pdf_url,
+        client_id=parent.client_id,
+        user_id=parent.user_id,
+        created_at=parent.created_at,
+        completed_at=parent.completed_at,
+    )
 
 
 def apply_result(
@@ -183,9 +252,18 @@ def list_audits(
     offset: int = 0,
     client_id: Optional[str] = None,
 ) -> Tuple[List[models.Audit], int]:
-    """Return a page of audits (newest first) and the total count."""
-    query = select(models.Audit)
-    count_query = select(func.count()).select_from(models.Audit)
+    """Return a page of audits (newest first) and the total count.
+
+    Page audits that belong to a URL-list (``parent_audit_id`` set) are hidden
+    from the top-level history — they appear under their parent list audit —
+    so the list stays one row per user-initiated run.
+    """
+    query = select(models.Audit).where(models.Audit.parent_audit_id.is_(None))
+    count_query = (
+        select(func.count())
+        .select_from(models.Audit)
+        .where(models.Audit.parent_audit_id.is_(None))
+    )
     if client_id is not None:
         query = query.where(models.Audit.client_id == client_id)
         count_query = count_query.where(models.Audit.client_id == client_id)
@@ -206,4 +284,13 @@ def get_audit(db: Session, audit_id: str) -> Optional[models.Audit]:
         select(models.Audit)
         .where(models.Audit.id == audit_id)
         .options(selectinload(models.Audit.findings))
+    )
+
+
+def get_batch(db: Session, audit_id: str) -> Optional[models.Audit]:
+    """Load a list audit with its page children eagerly (for the response)."""
+    return db.scalar(
+        select(models.Audit)
+        .where(models.Audit.id == audit_id, models.Audit.scope == "list")
+        .options(selectinload(models.Audit.children))
     )

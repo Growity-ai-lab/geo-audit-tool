@@ -195,6 +195,20 @@ başarısız olursa (tarayıcı yok / zaman aşımı) audit **çökmez**; ham HT
 (`requests`) zarifçe düşer ve sonuçta `rendered_with` hangi yolun kullanıldığını
 gösterir. Sonucun raw HTML'e mi yoksa render'a mı dayandığı raporda görünür.
 
+### URL listesi analizi (toplu denetim)
+
+Tek bir sayfa yerine **bir URL listesi** (SEO/GEO hedefli sayfalar: ana sayfa,
+kategori, ürün, blog) girip hepsini tek seferde denetleyebilirsiniz
+(`POST /audits/batch` / arayüzdeki "URL Listesi" sekmesi). Sonuç:
+
+- **Her URL kendi tam raporunu** alır (ayrı audit kaydı + indirilebilir PDF),
+  geçmişte ise tek bir "liste" satırı altında toplanır (alt sayfalar listeyi
+  kalabalıklaştırmaz).
+- **Ortalama skor** (erişilebilir sayfalar üzerinden) + **kategori
+  ortalamaları** + **ortak eksikler** (birden çok sayfada tekrarlayan bulgular,
+  en çok sayfayı etkileyen önce) ile bir **birleşik strateji raporu** (HTML/PDF)
+  üretilir — tek bir düzeltmenin tüm listeyi nasıl iyileştireceğini gösterir.
+
 ### SPA tespiti & "AI vs kullanıcı" render karşılaştırması
 
 İçeriğini JavaScript ile üreten (SPA) siteler, sunucudan **boş bir kabuk**

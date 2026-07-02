@@ -84,6 +84,15 @@ class Audit(Base):
         nullable=True,
         index=True,
     )
+    # For a URL-list audit: page audits (scope='page') point at their parent
+    # list audit (scope='list'). CASCADE so deleting the list removes its
+    # pages. Null for a standalone single-page audit.
+    parent_audit_id: Mapped[Optional[str]] = mapped_column(
+        String(32),
+        ForeignKey("audits.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
 
     url: Mapped[str] = mapped_column(String(2048), nullable=False)
     final_url: Mapped[Optional[str]] = mapped_column(String(2048), nullable=True)
@@ -125,6 +134,15 @@ class Audit(Base):
         back_populates="audit",
         cascade="all, delete-orphan",
         order_by="AuditFinding.sort_index",
+    )
+    # Self-referential: a list audit's child page audits (oldest first).
+    children: Mapped[List["Audit"]] = relationship(
+        back_populates="parent",
+        cascade="all, delete-orphan",
+        order_by="Audit.created_at",
+    )
+    parent: Mapped[Optional["Audit"]] = relationship(
+        back_populates="children", remote_side=[id]
     )
 
 

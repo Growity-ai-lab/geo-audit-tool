@@ -17,6 +17,8 @@ from ..schemas import (
     AuditRequest,
     AuditResponse,
     AuditSummary,
+    BatchAuditRequest,
+    BatchAuditResponse,
     OverrideUpdate,
 )
 
@@ -67,6 +69,55 @@ def create_audit(
     return repository.to_response(audit)
 
 
+# NOTE: the literal "/audits/batch" routes are declared before "/audits/{...}"
+# so they aren't shadowed by the parameterized paths below.
+@router.post("/audits/batch", response_model=BatchAuditResponse, status_code=202)
+def create_batch_audit(
+    req: BatchAuditRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+) -> BatchAuditResponse:
+    """Enqueue a URL-list audit: each URL becomes its own page audit and the
+    parent holds the average score + combined strategy report."""
+    urls = [u.strip() for u in req.urls if u and u.strip()]
+    if not urls:
+        raise HTTPException(status_code=422, detail="at least one url is required")
+
+    client_name: Optional[str] = None
+    if req.client_id:
+        client = repository.get_client(db, req.client_id)
+        if client is None:
+            raise HTTPException(status_code=404, detail="client not found")
+        client_name = client.name
+
+    parent_id = uuid.uuid4().hex
+    repository.create_batch_parent(db, parent_id=parent_id, req=req, user_id=current_user.id)
+
+    tasks.run_batch_task.delay(
+        parent_id=parent_id,
+        urls=urls,
+        client_name=client_name,
+        brand=req.brand,
+        render_js=req.render_js,
+    )
+
+    db.expire_all()
+    parent = repository.get_batch(db, parent_id)
+    return repository.to_batch_response(parent)
+
+
+@router.get("/audits/batch/{audit_id}", response_model=BatchAuditResponse)
+def get_batch_audit(
+    audit_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+) -> BatchAuditResponse:
+    parent = repository.get_batch(db, audit_id)
+    if parent is None:
+        raise HTTPException(status_code=404, detail="list audit not found")
+    return repository.to_batch_response(parent)
+
+
 @router.get("/audits", response_model=AuditListResponse)
 def list_audits(
     db: Session = Depends(get_db),
@@ -89,6 +140,7 @@ def list_audits(
             geo_score=a.geo_score,
             grade=a.grade,
             status=a.status,
+            scope=a.scope,
             rendered_with=a.rendered_with,
             created_at=a.created_at,
         )
