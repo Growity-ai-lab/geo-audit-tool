@@ -58,6 +58,25 @@ class AuditReport:
             "categories": [c.to_dict() for c in self.categories],
         }
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "AuditReport":
+        """Reconstruct a report from its ``to_dict()`` (or persisted
+        ``report_json``) shape — used to re-render an already-completed audit
+        (e.g. applying a manual override) without re-crawling the site."""
+        return cls(
+            url=data["url"],
+            final_url=data["final_url"],
+            reachable=data["reachable"],
+            error=data.get("error"),
+            total_score=data["geo_score"],
+            max_score=data["max_score"],
+            grade=data["grade"],
+            categories=[CategoryResult.from_dict(c) for c in data.get("categories", [])],
+            spa_suspected=data.get("spa_suspected", False),
+            render_comparison=data.get("render_comparison"),
+            ai_commentary=data.get("ai_commentary"),
+        )
+
 
 def grade_for(score: float) -> str:
     """Map a 0-100 score to a letter grade."""
@@ -112,6 +131,7 @@ def score(crawl_result: "crawler_mod.CrawlResult") -> AuditReport:
             crawl_result.llms_txt_found,
             crawl_result.llms_txt_url,
             crawl_result.llms_txt_content,
+            crawl_result.llms_txt_ambiguous,
         ),
         "schema": schema_checker.analyze(html),
         "content": content_analyzer.analyze(html),

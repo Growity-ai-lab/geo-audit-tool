@@ -1,7 +1,8 @@
 """Tests for report rendering (HTML export)."""
 
+from geo_audit.aggregate import aggregate_reports
 from geo_audit.crawler import CrawlResult
-from geo_audit.reporter import render_html
+from geo_audit.reporter import render_html, render_list_html
 from geo_audit.scorer import score
 
 
@@ -36,3 +37,24 @@ def test_html_unreachable_report():
     out = render_html(score(cr))
     assert "erişilemedi" in out.lower()
     assert "boom" in out
+
+
+def test_list_report_renders_pages_and_averages():
+    a = _report()
+    b = score(CrawlResult(url="https://b", ok=False, error="down", html=""))
+    out = render_list_html(aggregate_reports([a, b]), brand="Growity", client="Acme")
+    assert "<!DOCTYPE html>" in out
+    assert out.count("</style>") == 1  # extra CSS injected exactly once
+    assert "LİSTE RAPORU" in out
+    assert "Sayfa Bazlı Skorlar" in out
+    assert "Kategori Ortalamaları" in out
+    assert "Acme" in out
+    assert "erişilemedi" in out  # the unreachable page is shown, not dropped
+
+
+def test_list_report_escapes_client_input():
+    out = render_list_html(
+        aggregate_reports([_report()]), client="<script>alert(1)</script>"
+    )
+    assert "<script>alert(1)</script>" not in out
+    assert "&lt;script&gt;" in out

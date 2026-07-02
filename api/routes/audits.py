@@ -6,13 +6,20 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
+from geo_audit.overrides import OVERRIDABLE_KEYS
+from geo_audit.reporter import render_html
+
 from .. import auth, models, pdf as pdf_mod, repository, tasks
+from ..config import settings
 from ..db import get_db
 from ..schemas import (
     AuditListResponse,
     AuditRequest,
     AuditResponse,
     AuditSummary,
+    BatchAuditRequest,
+    BatchAuditResponse,
+    OverrideUpdate,
 )
 
 router = APIRouter(tags=["audits"])
@@ -62,6 +69,55 @@ def create_audit(
     return repository.to_response(audit)
 
 
+# NOTE: the literal "/audits/batch" routes are declared before "/audits/{...}"
+# so they aren't shadowed by the parameterized paths below.
+@router.post("/audits/batch", response_model=BatchAuditResponse, status_code=202)
+def create_batch_audit(
+    req: BatchAuditRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+) -> BatchAuditResponse:
+    """Enqueue a URL-list audit: each URL becomes its own page audit and the
+    parent holds the average score + combined strategy report."""
+    urls = [u.strip() for u in req.urls if u and u.strip()]
+    if not urls:
+        raise HTTPException(status_code=422, detail="at least one url is required")
+
+    client_name: Optional[str] = None
+    if req.client_id:
+        client = repository.get_client(db, req.client_id)
+        if client is None:
+            raise HTTPException(status_code=404, detail="client not found")
+        client_name = client.name
+
+    parent_id = uuid.uuid4().hex
+    repository.create_batch_parent(db, parent_id=parent_id, req=req, user_id=current_user.id)
+
+    tasks.run_batch_task.delay(
+        parent_id=parent_id,
+        urls=urls,
+        client_name=client_name,
+        brand=req.brand,
+        render_js=req.render_js,
+    )
+
+    db.expire_all()
+    parent = repository.get_batch(db, parent_id)
+    return repository.to_batch_response(parent)
+
+
+@router.get("/audits/batch/{audit_id}", response_model=BatchAuditResponse)
+def get_batch_audit(
+    audit_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+) -> BatchAuditResponse:
+    parent = repository.get_batch(db, audit_id)
+    if parent is None:
+        raise HTTPException(status_code=404, detail="list audit not found")
+    return repository.to_batch_response(parent)
+
+
 @router.get("/audits", response_model=AuditListResponse)
 def list_audits(
     db: Session = Depends(get_db),
@@ -84,6 +140,7 @@ def list_audits(
             geo_score=a.geo_score,
             grade=a.grade,
             status=a.status,
+            scope=a.scope,
             rendered_with=a.rendered_with,
             created_at=a.created_at,
         )
@@ -104,6 +161,53 @@ def get_audit(
     return repository.to_response(audit)
 
 
+@router.patch("/audits/{audit_id}/overrides", response_model=AuditResponse)
+def update_overrides(
+    audit_id: str,
+    body: OverrideUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+) -> AuditResponse:
+    """Confirm (or retract) a manual correction for an ambiguous finding.
+
+    Only findings the crawler flagged with an ``override_key`` (WAF/rate-
+    limit blocked automated verification) are affected — see
+    ``geo_audit/overrides.py``. Unknown keys are rejected so a frontend typo
+    doesn't silently no-op.
+    """
+    unknown = set(body.overrides) - set(OVERRIDABLE_KEYS)
+    if unknown:
+        raise HTTPException(
+            status_code=422, detail=f"unknown override key(s): {sorted(unknown)}"
+        )
+
+    audit = repository.get_audit(db, audit_id)
+    if audit is None:
+        raise HTTPException(status_code=404, detail="audit not found")
+    if not audit.report_json:
+        raise HTTPException(
+            status_code=409, detail="audit has no report yet (still queued/running)"
+        )
+
+    audit = repository.update_overrides(db, audit, body.overrides)
+    return repository.to_response(audit)
+
+
+def _render_artifact_html(audit: models.Audit, db: Session) -> str:
+    """The stored HTML if no overrides are active (fast path), else a fresh
+    render reflecting the current overrides — the artifact must match what
+    ``GET /audits/{id}`` reports."""
+    if not audit.overrides:
+        return audit.report_html
+
+    report = repository.adjusted_report(audit)
+    client_name = ""
+    if audit.client_id:
+        client = repository.get_client(db, audit.client_id)
+        client_name = client.name if client else ""
+    return render_html(report, brand=settings.default_brand, client=client_name)
+
+
 @router.get("/audits/{audit_id}/{name}")
 def get_artifact(
     audit_id: str, name: str, db: Session = Depends(get_db)
@@ -122,13 +226,13 @@ def get_artifact(
     if audit is None or not audit.report_html:
         raise HTTPException(status_code=404, detail="artifact not found")
 
+    html = _render_artifact_html(audit, db)
+
     if name == "report.html":
-        return Response(
-            content=audit.report_html, media_type="text/html; charset=utf-8"
-        )
+        return Response(content=html, media_type="text/html; charset=utf-8")
 
     try:
-        pdf_bytes = pdf_mod.html_to_pdf(audit.report_html)
+        pdf_bytes = pdf_mod.html_to_pdf(html)
     except Exception as exc:  # noqa: BLE001 - browser may be unavailable
         raise HTTPException(
             status_code=503, detail=f"PDF generation unavailable: {exc}"

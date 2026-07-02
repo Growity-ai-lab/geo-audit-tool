@@ -195,6 +195,20 @@ başarısız olursa (tarayıcı yok / zaman aşımı) audit **çökmez**; ham HT
 (`requests`) zarifçe düşer ve sonuçta `rendered_with` hangi yolun kullanıldığını
 gösterir. Sonucun raw HTML'e mi yoksa render'a mı dayandığı raporda görünür.
 
+### URL listesi analizi (toplu denetim)
+
+Tek bir sayfa yerine **bir URL listesi** (SEO/GEO hedefli sayfalar: ana sayfa,
+kategori, ürün, blog) girip hepsini tek seferde denetleyebilirsiniz
+(`POST /audits/batch` / arayüzdeki "URL Listesi" sekmesi). Sonuç:
+
+- **Her URL kendi tam raporunu** alır (ayrı audit kaydı + indirilebilir PDF),
+  geçmişte ise tek bir "liste" satırı altında toplanır (alt sayfalar listeyi
+  kalabalıklaştırmaz).
+- **Ortalama skor** (erişilebilir sayfalar üzerinden) + **kategori
+  ortalamaları** + **ortak eksikler** (birden çok sayfada tekrarlayan bulgular,
+  en çok sayfayı etkileyen önce) ile bir **birleşik strateji raporu** (HTML/PDF)
+  üretilir — tek bir düzeltmenin tüm listeyi nasıl iyileştireceğini gösterir.
+
 ### SPA tespiti & "AI vs kullanıcı" render karşılaştırması
 
 İçeriğini JavaScript ile üreten (SPA) siteler, sunucudan **boş bir kabuk**
@@ -235,6 +249,26 @@ görünmez). PSI gibi config-gated: istek başına açma/kapama yok.
 export ANTHROPIC_API_KEY=...              # console.anthropic.com
 export AI_COMMENTARY_MODEL=claude-haiku-4-5   # varsayılan
 ```
+
+### Belirsiz bulgular için manuel onay
+
+Sitemap, robots.txt ve llms.txt kontrolleri hedef sitenin WAF/rate-limit'i
+yüzünden yanlış negatif verebilir (istek engellenir, dosyanın kendisi değil).
+Bu durumda otomatik skor "yok" yerine **"doğrulanamadı"** der ve ilgili bulgu
+`override_key` taşır; arayüzde bu bulgunun altında bir **manuel onay
+checkbox'ı** çıkar. Ekip üyesi URL'yi kendisi kontrol edip işaretlerse,
+skor anında güncellenir (`PATCH /audits/{id}/overrides`):
+
+| override_key | Anlamı | İşaretlenirse |
+|---|---|---|
+| `sitemap_exists` | Sitemap gerçekten var | `page_speed` kategorisine kalan yarım puan eklenir |
+| `llms_txt_exists` | llms.txt gerçekten var | `llms_txt` kategorisine varlık puanı eklenir (içerik kalitesi otomatik değerlendirilemez) |
+| `robots_blocked` | robots.txt aslında bir AI botunu engelliyor | `bot_access`'ten bir bot payı düşülür (varsayılan iyimser tahminin tersi yönde) |
+
+Otomatik temel sonuç (`report_json`/`report_html`) hiçbir zaman değişmez —
+override'lar ayrı bir alanda (`audits.overrides`) saklanır ve her serve'de
+üzerine uygulanır, böylece bir checkbox'ı geri almak sadece anahtarı
+kaldırmak kadar basittir.
 
 ## Scoring model
 

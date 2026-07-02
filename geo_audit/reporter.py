@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from . import FAIL, OK, WARN
+from .aggregate import AggregateReport
 from .scorer import AuditReport, CATEGORY_ORDER, grade_description
 
 # ANSI colors (auto-disabled when output is not a TTY).
@@ -661,6 +662,137 @@ def _html_shell(logo_html, brand, url, when, body) -> str:
   </div>
 </body>
 </html>"""
+
+
+def render_list_html(
+    aggregate: AggregateReport,
+    brand: str = "Growity",
+    client: str = "",
+    logo: str = "",
+    client_logo: str = "",
+    generated_at: Optional[str] = None,
+) -> str:
+    """Render a combined "strategy" report over a list of audited pages.
+
+    Mirrors ``render_html`` visually (same shell/gauge/cards) but summarizes
+    many pages: an average-score cover, a per-page score table, per-category
+    averages, and the gaps shared across pages (where a single fix lifts the
+    whole set)."""
+    when = generated_at or datetime.now().strftime("%d.%m.%Y %H:%M")
+    logo_html = _logo_markup(brand, logo)
+    client_logo_html = _client_logo_markup(client, client_logo)
+    title = client or "URL Listesi"
+
+    avg = aggregate.avg_score
+    ratio = avg / 100 if avg else 0
+    grade_color = _hue(ratio)
+    deg = round(ratio * 360)
+
+    cover = f"""
+    <section class="cover">
+      <div class="cover-l">
+        <div class="eyebrow">GEO / AIO LİSTE RAPORU</div>
+        {client_logo_html}
+        <h1>{_esc(title)}</h1>
+        <a class="cover-url">{aggregate.url_count} sayfa · {aggregate.reachable_count} erişilebilir</a>
+        <div class="cover-meta">Rapor tarihi: {_esc(when)}</div>
+      </div>
+      <div class="cover-r">
+        <div class="gauge" style="background:conic-gradient(#ffffff {deg}deg, rgba(255,255,255,.22) 0deg);">
+          <div class="gauge-inner">
+            <div class="score" style="color:{grade_color}">{avg:.0f}<span class="of">/100</span></div>
+            <div class="grade">Ort. {aggregate.grade}</div>
+          </div>
+        </div>
+      </div>
+    </section>"""
+
+    summary = f"""
+    <section class="summary">
+      <p class="verdict">{_esc(grade_description(avg))} (Liste ortalaması)</p>
+      <div class="stats">
+        <div class="stat stat-ok"><b>{aggregate.url_count}</b><span>sayfa</span></div>
+        <div class="stat stat-warn"><b>{aggregate.reachable_count}</b><span>erişilebilir</span></div>
+      </div>
+    </section>"""
+
+    # --- Per-page score table -------------------------------------------
+    rows = ""
+    for p in aggregate.pages:
+        if p["reachable"]:
+            score_cell = f"{p['geo_score']:.0f}"
+            grade_cell = (
+                f"<span style='color:{_hue((p['geo_score'] or 0)/100)};font-weight:700'>"
+                f"{p['grade']}</span>"
+            )
+        else:
+            score_cell = "—"
+            grade_cell = "<span style='color:#b91c1c;font-weight:700'>erişilemedi</span>"
+        rows += (
+            f"<tr><td style='text-align:left;word-break:break-all'>{_esc(p['final_url'] or p['url'])}</td>"
+            f"<td>{score_cell}</td><td>{grade_cell}</td></tr>"
+        )
+    pages_block = f"""
+    <section class="card">
+      <h2><span class="h2-accent"></span>Sayfa Bazlı Skorlar</h2>
+      <table class="deltas"><thead><tr><th>URL</th><th>Skor</th><th>Not</th></tr></thead>
+      <tbody>{rows}</tbody></table>
+    </section>"""
+
+    # --- Category averages ----------------------------------------------
+    cat_rows = ""
+    for c in aggregate.category_averages:
+        color = _hue(c["avg_ratio"])
+        icon = CATEGORY_ICON.get(c["key"], "•")
+        cat_rows += f"""
+        <div class="listcat">
+          <div class="listcat-head">
+            <span><span class="cat-icon">{icon}</span> {_esc(c['name'])}</span>
+            <span style="color:{color};font-weight:800">{c['avg_score']:.1f}<span style="color:var(--muted);font-weight:700;font-size:12px">/{int(c['max_score'])}</span></span>
+          </div>
+          <div class="bar"><div class="bar-fill" style="width:{c['avg_ratio']*100:.0f}%;background:{color}"></div></div>
+        </div>"""
+    cats_block = f"""
+    <section class="card">
+      <h2><span class="h2-accent"></span>Kategori Ortalamaları</h2>
+      {cat_rows}
+    </section>"""
+
+    # --- Shared gaps / strategy -----------------------------------------
+    if aggregate.top_gaps:
+        gap_rows = "".join(
+            f"""<li class="{'pa-fail' if g['severity']==FAIL else 'pa-warn'}">
+                  <span class="pa-tag">{g['page_count']} sayfa</span>
+                  <div><span class="pa-cat">{_esc(g['category'])}</span>
+                  <span class="pa-rec">{_esc(g['recommendation'] or g['message'])}</span></div>
+                </li>"""
+            for g in aggregate.top_gaps
+        )
+        strategy = f"""
+        <section class="card">
+          <h2><span class="h2-accent"></span>Ortak Eksikler — Öncelikli Strateji</h2>
+          <p style="font-size:13.5px;color:var(--muted);margin:0 0 12px">Aşağıdaki
+          eksikler birden çok sayfada tekrarlıyor; tek bir düzeltme tüm listeyi
+          birden iyileştirir (en çok sayfayı etkileyenler önce).</p>
+          <ol class="actions">{gap_rows}</ol>
+        </section>"""
+    else:
+        strategy = ""
+
+    offering = _offering_block(brand)
+    body = cover + summary + pages_block + cats_block + strategy + offering
+    shell = _html_shell(logo_html, brand, title, when, body)
+    # A small amount of extra CSS for the list-category rows.
+    return shell.replace(
+        "</style>",
+        """
+  .listcat {{ margin-bottom:14px; }}
+  .listcat:last-child {{ margin-bottom:0; }}
+  .listcat-head {{ display:flex; justify-content:space-between; align-items:center;
+                   font-size:14px; margin-bottom:6px; }}
+</style>""".replace("{{", "{").replace("}}", "}"),
+        1,
+    )
 
 
 def export_html(

@@ -84,6 +84,15 @@ class Audit(Base):
         nullable=True,
         index=True,
     )
+    # For a URL-list audit: page audits (scope='page') point at their parent
+    # list audit (scope='list'). CASCADE so deleting the list removes its
+    # pages. Null for a standalone single-page audit.
+    parent_audit_id: Mapped[Optional[str]] = mapped_column(
+        String(32),
+        ForeignKey("audits.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
 
     url: Mapped[str] = mapped_column(String(2048), nullable=False)
     final_url: Mapped[Optional[str]] = mapped_column(String(2048), nullable=True)
@@ -99,6 +108,9 @@ class Audit(Base):
     site_aggregate_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Immutable baseline from the automated crawl — never rewritten by
+    # overrides (see below), so a checkbox can always be un-toggled back to
+    # exactly what detection originally found.
     report_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     # Rendered HTML report, stored in the DB so any service (api) can serve it
     # and regenerate the PDF on demand — no shared filesystem needed across the
@@ -106,6 +118,11 @@ class Audit(Base):
     report_html: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     html_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     pdf_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    # Manual corrections for findings the crawler could only mark "ambiguous"
+    # (WAF/rate-limit blocked verification) — e.g. {"sitemap_exists": true}.
+    # Applied on top of report_json at serve time (geo_audit.overrides);
+    # report_json/report_html above are never mutated by this.
+    overrides: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=_now, nullable=False, index=True
@@ -117,6 +134,15 @@ class Audit(Base):
         back_populates="audit",
         cascade="all, delete-orphan",
         order_by="AuditFinding.sort_index",
+    )
+    # Self-referential: a list audit's child page audits (oldest first).
+    children: Mapped[List["Audit"]] = relationship(
+        back_populates="parent",
+        cascade="all, delete-orphan",
+        order_by="Audit.created_at",
+    )
+    parent: Mapped[Optional["Audit"]] = relationship(
+        back_populates="children", remote_side=[id]
     )
 
 

@@ -1,7 +1,7 @@
 """Pydantic request/response models for the API."""
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,6 +35,11 @@ class CategoryFinding(BaseModel):
     severity: str
     message: str
     recommendation: str = ""
+    # Set only on findings where automated detection was inconclusive (a WAF/
+    # rate-limit blocked verification). The frontend renders a manual-override
+    # checkbox for any finding carrying one of these keys — see
+    # geo_audit/overrides.py for the known keys and their effect.
+    override_key: Optional[str] = None
 
 
 class CategorySummary(BaseModel):
@@ -69,6 +74,9 @@ class AuditResponse(BaseModel):
     # AI-generated narrative commentary (executive summary + per-category
     # rationale), or None if ANTHROPIC_API_KEY isn't set / generation failed.
     ai_commentary: Optional[dict] = None
+    # Manually confirmed corrections for ambiguous findings (see
+    # CategoryFinding.override_key), applied on top of the automated result.
+    overrides: Dict[str, bool] = {}
     # Relative artifact paths (frontend prefixes with the API base URL).
     html_url: Optional[str] = None
     pdf_url: Optional[str] = None
@@ -84,6 +92,17 @@ class AuditResponse(BaseModel):
     completed_at: Optional[datetime] = None
 
 
+class OverrideUpdate(BaseModel):
+    """Payload for ``PATCH /audits/{id}/overrides``.
+
+    Partial update: keys present here are merged into the audit's existing
+    overrides (an omitted key keeps its current value; it does not reset).
+    Keys must be one of geo_audit.overrides.OVERRIDABLE_KEYS.
+    """
+
+    overrides: Dict[str, bool]
+
+
 class AuditSummary(BaseModel):
     """Compact audit row for the list endpoint (no full report payload)."""
 
@@ -96,6 +115,7 @@ class AuditSummary(BaseModel):
     geo_score: Optional[float] = None
     grade: Optional[str] = None
     status: str
+    scope: str = "page"
     rendered_with: Optional[str] = None
     created_at: Optional[datetime] = None
 
@@ -105,6 +125,78 @@ class AuditListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# --- Batch (URL-list) audits ---------------------------------------------- #
+
+
+class BatchAuditRequest(BaseModel):
+    """Payload for ``POST /audits/batch`` — audit several URLs as one list."""
+
+    urls: List[str] = Field(
+        ..., min_length=1, max_length=50,
+        description="URLs to audit (one list audit; each becomes a page audit).",
+    )
+    client: str = Field("", description="Client name shown on the report cover.")
+    client_id: Optional[str] = Field(
+        None, description="Link this list to a stored client (name used on cover)."
+    )
+    brand: Optional[str] = Field(None, description="Brand in the report header.")
+    render_js: bool = Field(
+        False, description="Render each page with headless Chromium (for SPAs)."
+    )
+
+
+class PageSummary(BaseModel):
+    """One audited page within a list (links to its own full report)."""
+
+    audit_id: str
+    url: str
+    final_url: Optional[str] = None
+    reachable: bool = False
+    geo_score: Optional[float] = None
+    grade: Optional[str] = None
+    status: str = "queued"
+    error: Optional[str] = None
+    html_url: Optional[str] = None
+    pdf_url: Optional[str] = None
+
+
+class CategoryAverage(BaseModel):
+    key: str
+    name: str
+    avg_score: float
+    max_score: float
+    avg_ratio: float
+
+
+class GapSummary(BaseModel):
+    category: str
+    message: str
+    recommendation: str = ""
+    severity: str
+    page_count: int
+
+
+class BatchAuditResponse(BaseModel):
+    """A list audit: the parent row plus its per-page children and aggregate."""
+
+    audit_id: str
+    status: str = "queued"
+    url_count: int = 0
+    reachable_count: int = 0
+    avg_score: Optional[float] = None
+    grade: Optional[str] = None
+    category_averages: List[CategoryAverage] = []
+    top_gaps: List[GapSummary] = []
+    pages: List[PageSummary] = []
+    # Combined "strategy" report over the whole list.
+    html_url: Optional[str] = None
+    pdf_url: Optional[str] = None
+    client_id: Optional[str] = None
+    user_id: Optional[str] = None
+    created_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
 
 
 # --- Clients -------------------------------------------------------------- #

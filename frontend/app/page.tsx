@@ -9,7 +9,11 @@ import {
   getToken,
   login,
   runAudit,
+  runBatch,
+  updateOverrides,
+  type AuditFinding,
   type AuditResult,
+  type BatchAuditResult,
   type CurrentUser,
   type RenderComparison,
 } from "../lib/api";
@@ -120,8 +124,12 @@ function LoginForm({ onSuccess }: { onSuccess: (u: CurrentUser) => void }) {
   );
 }
 
+type Mode = "single" | "list";
+
 function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void }) {
+  const [mode, setMode] = useState<Mode>("single");
   const [url, setUrl] = useState("");
+  const [urlsText, setUrlsText] = useState("");
   const [client, setClient] = useState("");
   const [renderJs, setRenderJs] = useState(false);
   const [compareRender, setCompareRender] = useState(false);
@@ -129,14 +137,20 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
   const [statusText, setStatusText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AuditResult | null>(null);
+  const [batchResult, setBatchResult] = useState<BatchAuditResult | null>(null);
 
-  async function onSubmit(e: React.FormEvent) {
+  function reset() {
+    setResult(null);
+    setBatchResult(null);
+    setError(null);
+  }
+
+  async function onSubmitSingle(e: React.FormEvent) {
     e.preventDefault();
     if (!url.trim()) return;
     setLoading(true);
     setStatusText(null);
-    setError(null);
-    setResult(null);
+    reset();
     try {
       const res = await runAudit(
         {
@@ -147,16 +161,36 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
         },
         (s) => setStatusText(s === "queued" ? "Kuyrukta…" : "Çalışıyor…"),
       );
-      if (res.status === "error") {
-        setError(res.error || "Denetim başarısız oldu.");
-      } else {
-        setResult(res);
-      }
+      if (res.status === "error") setError(res.error || "Denetim başarısız oldu.");
+      else setResult(res);
     } catch (err) {
-      if (err instanceof AuthError) {
-        onLogout();
-        return;
-      }
+      if (err instanceof AuthError) return onLogout();
+      setError(err instanceof Error ? err.message : "Bilinmeyen hata.");
+    } finally {
+      setLoading(false);
+      setStatusText(null);
+    }
+  }
+
+  async function onSubmitList(e: React.FormEvent) {
+    e.preventDefault();
+    const urls = urlsText
+      .split("\n")
+      .map((u) => u.trim())
+      .filter(Boolean);
+    if (urls.length === 0) return;
+    setLoading(true);
+    setStatusText(null);
+    reset();
+    try {
+      const res = await runBatch(
+        { urls, client: client.trim() || undefined, render_js: renderJs },
+        (s) => setStatusText(s === "queued" ? "Kuyrukta…" : "Sayfalar denetleniyor…"),
+      );
+      if (res.status === "error") setError("Liste denetimi başarısız oldu.");
+      else setBatchResult(res);
+    } catch (err) {
+      if (err instanceof AuthError) return onLogout();
       setError(err instanceof Error ? err.message : "Bilinmeyen hata.");
     } finally {
       setLoading(false);
@@ -184,33 +218,66 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
       </div>
       <h1 style={{ fontSize: 28, marginBottom: 4 }}>GEO Audit</h1>
       <p style={{ color: "#9fb0c7", marginTop: 0 }}>
-        Bir URL girin; AI arama motorları için GEO/AIO hazırlık skorunu ve markalı
-        raporu alın.
+        Tek bir URL ya da bir URL listesi girin; AI arama motorları için GEO/AIO
+        hazırlık skorunu ve markalı raporu alın.
       </p>
 
+      {/* Mode toggle */}
+      <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+        <button
+          type="button"
+          onClick={() => { setMode("single"); reset(); }}
+          style={tabStyle(mode === "single")}
+        >
+          Tek URL
+        </button>
+        <button
+          type="button"
+          onClick={() => { setMode("list"); reset(); }}
+          style={tabStyle(mode === "list")}
+        >
+          URL Listesi
+        </button>
+      </div>
+
       <form
-        onSubmit={onSubmit}
+        onSubmit={mode === "single" ? onSubmitSingle : onSubmitList}
         style={{
           display: "grid",
           gap: 12,
           background: "#111a2e",
           border: "1px solid #1f2c47",
           borderRadius: 12,
+          borderTopLeftRadius: 0,
           padding: 20,
-          marginTop: 20,
+          marginTop: 0,
         }}
       >
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>Denetlenecek URL</span>
-          <input
-            type="text"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="dardanel.com.tr"
-            required
-            style={inputStyle}
-          />
-        </label>
+        {mode === "single" ? (
+          <label style={{ display: "grid", gap: 6 }}>
+            <span>Denetlenecek URL</span>
+            <input
+              type="text"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="dardanel.com.tr"
+              required
+              style={inputStyle}
+            />
+          </label>
+        ) : (
+          <label style={{ display: "grid", gap: 6 }}>
+            <span>URL listesi (her satıra bir URL — SEO/GEO hedefli sayfalar)</span>
+            <textarea
+              value={urlsText}
+              onChange={(e) => setUrlsText(e.target.value)}
+              placeholder={"dardanel.com.tr\ndardanel.com.tr/urunler\ndardanel.com.tr/blog"}
+              rows={6}
+              required
+              style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
+            />
+          </label>
+        )}
 
         <label style={{ display: "grid", gap: 6 }}>
           <span>Müşteri adı (opsiyonel — rapor kapağında görünür)</span>
@@ -227,23 +294,29 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
           <input
             type="checkbox"
             checked={renderJs}
-            disabled={compareRender}
+            disabled={mode === "single" && compareRender}
             onChange={(e) => setRenderJs(e.target.checked)}
           />
           <span>JavaScript ile render et (SPA siteleri için)</span>
         </label>
 
-        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="checkbox"
-            checked={compareRender}
-            onChange={(e) => setCompareRender(e.target.checked)}
-          />
-          <span>AI vs kullanıcı karşılaştır (ham HTML ↔ JS render farkı)</span>
-        </label>
+        {mode === "single" && (
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={compareRender}
+              onChange={(e) => setCompareRender(e.target.checked)}
+            />
+            <span>AI vs kullanıcı karşılaştır (ham HTML ↔ JS render farkı)</span>
+          </label>
+        )}
 
         <button type="submit" disabled={loading} style={buttonStyle(loading)}>
-          {loading ? statusText ?? "Denetleniyor…" : "Denetle"}
+          {loading
+            ? statusText ?? "Denetleniyor…"
+            : mode === "single"
+              ? "Denetle"
+              : "Listeyi Denetle"}
         </button>
       </form>
 
@@ -268,8 +341,11 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
           pdfUrl={pdfUrl}
           htmlUrl={htmlUrl}
           requestedJs={renderJs}
+          onUpdate={setResult}
         />
       )}
+
+      {batchResult && <BatchResultView result={batchResult} />}
     </main>
   );
 }
@@ -279,11 +355,13 @@ function ResultView({
   pdfUrl,
   htmlUrl,
   requestedJs,
+  onUpdate,
 }: {
   result: AuditResult;
   pdfUrl: string | null;
   htmlUrl: string | null;
   requestedJs: boolean;
+  onUpdate: (r: AuditResult) => void;
 }) {
   if (!result.reachable) {
     return (
@@ -343,6 +421,8 @@ function ResultView({
         result.spa_suspected && <SpaWarning />
       )}
 
+      <OverridesPanel result={result} onUpdate={onUpdate} />
+
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         {pdfUrl && (
           <a href={pdfUrl} target="_blank" rel="noreferrer" style={linkButton("#2563eb")}>
@@ -397,6 +477,263 @@ function ResultView({
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Findings the crawler could only mark "ambiguous" (a WAF/rate-limit blocked
+ * verification, e.g. sitemap check hitting a Cloudflare block) carry an
+ * override_key. This panel lets a team member confirm what they found by
+ * checking the URL by hand, updating the score immediately.
+ */
+function OverridesPanel({
+  result,
+  onUpdate,
+}: {
+  result: AuditResult;
+  onUpdate: (r: AuditResult) => void;
+}) {
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const overridable = result.categories.flatMap((cat) =>
+    cat.findings
+      .filter((f): f is AuditFinding & { override_key: string } => !!f.override_key)
+      .map((f) => ({ category: cat.name, finding: f })),
+  );
+
+  if (overridable.length === 0) return null;
+
+  async function onToggle(key: string, checked: boolean) {
+    setPending(key);
+    setError(null);
+    try {
+      const updated = await updateOverrides(result.audit_id, { [key]: checked });
+      onUpdate(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Düzeltme kaydedilemedi.");
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <div style={{ ...cardStyle, borderColor: "#b45309" }}>
+      <h2 style={{ marginTop: 0, fontSize: 18 }}>Belirsiz Bulgular — Manuel Onay</h2>
+      <p style={{ fontSize: 13, color: "#9fb0c7", marginTop: 0 }}>
+        Bu kontroller otomatik olarak doğrulanamadı (istek engellenmiş/kısıtlanmış
+        olabilir). URL&apos;yi kendiniz kontrol ettiyseniz işaretleyin; skor buna
+        göre güncellenir.
+      </p>
+      <div style={{ display: "grid", gap: 10 }}>
+        {overridable.map(({ category, finding }) => {
+          const key = finding.override_key;
+          const checked = result.overrides[key] === true;
+          return (
+            <label
+              key={key}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 10,
+                padding: "8px 0",
+                borderTop: "1px solid #1f2c47",
+                cursor: pending ? "default" : "pointer",
+                opacity: pending && pending !== key ? 0.6 : 1,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={pending !== null}
+                onChange={(e) => onToggle(key, e.target.checked)}
+                style={{ marginTop: 3 }}
+              />
+              <div>
+                <div style={{ fontSize: 13, color: "#9fb0c7" }}>{category}</div>
+                <div style={{ fontSize: 14 }}>{finding.message}</div>
+              </div>
+            </label>
+          );
+        })}
+      </div>
+      {error && (
+        <div style={{ color: "#fecaca", fontSize: 13, marginTop: 10 }}>{error}</div>
+      )}
+    </div>
+  );
+}
+
+function BatchResultView({ result }: { result: BatchAuditResult }) {
+  const gradeColor = GRADE_COLORS[result.grade ?? ""] ?? "#9fb0c7";
+  const avg = Math.round(result.avg_score ?? 0);
+  const reportHtml = artifactUrl(result.html_url);
+  const reportPdf = artifactUrl(result.pdf_url);
+
+  return (
+    <div style={{ marginTop: 24, display: "grid", gap: 16 }}>
+      <div style={{ ...cardStyle, display: "flex", alignItems: "center", gap: 20 }}>
+        <div
+          style={{
+            width: 96,
+            height: 96,
+            borderRadius: "50%",
+            display: "grid",
+            placeItems: "center",
+            border: `6px solid ${gradeColor}`,
+            flexShrink: 0,
+          }}
+        >
+          <span style={{ fontSize: 30, fontWeight: 700 }}>{avg}</span>
+        </div>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>
+            Ortalama: {avg}/100 <span style={{ color: gradeColor }}>({result.grade})</span>
+          </div>
+          <div style={{ color: "#9fb0c7", marginTop: 4 }}>
+            {result.url_count} sayfa · {result.reachable_count} erişilebilir
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        {reportPdf && (
+          <a href={reportPdf} target="_blank" rel="noreferrer" style={linkButton("#2563eb")}>
+            Strateji raporu (PDF)
+          </a>
+        )}
+        {reportHtml && (
+          <a href={reportHtml} target="_blank" rel="noreferrer" style={linkButton("#334155")}>
+            Strateji raporu (HTML)
+          </a>
+        )}
+      </div>
+
+      {/* Per-page scores */}
+      <div style={cardStyle}>
+        <h2 style={{ marginTop: 0, fontSize: 18 }}>Sayfa Bazlı Skorlar</h2>
+        <div style={{ display: "grid", gap: 4 }}>
+          {result.pages.map((p) => {
+            const pageHtml = artifactUrl(p.html_url);
+            const c = GRADE_COLORS[p.grade ?? ""] ?? "#9fb0c7";
+            return (
+              <div
+                key={p.audit_id}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto auto",
+                  gap: 12,
+                  alignItems: "center",
+                  fontSize: 14,
+                  padding: "8px 0",
+                  borderTop: "1px solid #1f2c47",
+                }}
+              >
+                <span style={{ wordBreak: "break-all" }}>
+                  {pageHtml ? (
+                    <a href={pageHtml} target="_blank" rel="noreferrer" style={{ color: "#93c5fd" }}>
+                      {p.final_url || p.url}
+                    </a>
+                  ) : (
+                    p.final_url || p.url
+                  )}
+                </span>
+                {p.reachable ? (
+                  <>
+                    <span style={{ color: "#9fb0c7" }}>{Math.round(p.geo_score ?? 0)}</span>
+                    <span style={{ color: c, fontWeight: 700, minWidth: 20, textAlign: "right" }}>
+                      {p.grade}
+                    </span>
+                  </>
+                ) : (
+                  <span style={{ gridColumn: "2 / 4", color: "#ef4444", textAlign: "right" }}>
+                    erişilemedi
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Category averages */}
+      <div style={cardStyle}>
+        <h2 style={{ marginTop: 0, fontSize: 18 }}>Kategori Ortalamaları</h2>
+        <div style={{ display: "grid", gap: 10 }}>
+          {result.category_averages.map((c) => (
+            <div key={c.key}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 14,
+                  marginBottom: 4,
+                }}
+              >
+                <span>{c.name}</span>
+                <span style={{ color: "#9fb0c7" }}>
+                  {c.avg_score.toFixed(1)} / {c.max_score}
+                </span>
+              </div>
+              <div style={{ height: 8, borderRadius: 4, background: "#1f2c47", overflow: "hidden" }}>
+                <div
+                  style={{
+                    width: `${Math.round(c.avg_ratio * 100)}%`,
+                    height: "100%",
+                    background: ratioColor(c.avg_ratio),
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Shared gaps / strategy */}
+      {result.top_gaps.length > 0 && (
+        <div style={cardStyle}>
+          <h2 style={{ marginTop: 0, fontSize: 18 }}>Ortak Eksikler — Öncelikli Strateji</h2>
+          <p style={{ fontSize: 13, color: "#9fb0c7", marginTop: 0 }}>
+            Birden çok sayfada tekrarlayan eksikler; tek düzeltme tüm listeyi
+            iyileştirir.
+          </p>
+          <div style={{ display: "grid", gap: 4 }}>
+            {result.top_gaps.map((g, i) => (
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  alignItems: "flex-start",
+                  padding: "8px 0",
+                  borderTop: "1px solid #1f2c47",
+                }}
+              >
+                <span
+                  style={{
+                    flexShrink: 0,
+                    fontSize: 11,
+                    fontWeight: 800,
+                    padding: "3px 9px",
+                    borderRadius: 7,
+                    background: g.severity === "fail" ? "#3a1620" : "#3a2e10",
+                    color: g.severity === "fail" ? "#fecaca" : "#fcd34d",
+                  }}
+                >
+                  {g.page_count} sayfa
+                </span>
+                <div>
+                  <span style={{ fontWeight: 700 }}>{g.category}</span>
+                  <span style={{ display: "block", color: "#9fb0c7", fontSize: 13, marginTop: 2 }}>
+                    {g.recommendation || g.message}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -553,5 +890,21 @@ function linkButton(bg: string): React.CSSProperties {
     textDecoration: "none",
     fontWeight: 600,
     fontSize: 14,
+  };
+}
+
+function tabStyle(active: boolean): React.CSSProperties {
+  return {
+    padding: "9px 18px",
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    border: "1px solid #1f2c47",
+    borderBottom: active ? "1px solid #111a2e" : "1px solid #1f2c47",
+    marginBottom: -1,
+    background: active ? "#111a2e" : "#0b1220",
+    color: active ? "#e6edf6" : "#9fb0c7",
+    fontSize: 14,
+    fontWeight: 600,
+    cursor: "pointer",
   };
 }

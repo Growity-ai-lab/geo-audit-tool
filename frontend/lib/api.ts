@@ -74,6 +74,9 @@ export interface AuditFinding {
   severity: "ok" | "warn" | "fail";
   message: string;
   recommendation: string;
+  // Set only when automated detection was inconclusive (a WAF/rate-limit
+  // blocked verification) — the UI offers a manual-confirm checkbox for it.
+  override_key: string | null;
 }
 
 export interface AuditCategory {
@@ -117,6 +120,9 @@ export interface AuditResult {
   categories: AuditCategory[];
   spa_suspected: boolean;
   render_comparison: RenderComparison | null;
+  // Manually confirmed corrections for ambiguous findings, keyed by
+  // AuditFinding.override_key (e.g. { sitemap_exists: true }).
+  overrides: Record<string, boolean>;
   html_url: string | null;
   pdf_url: string | null;
   status: AuditStatus;
@@ -127,6 +133,55 @@ export interface AuditInput {
   client?: string;
   render_js?: boolean;
   compare_render?: boolean;
+}
+
+export interface PageSummary {
+  audit_id: string;
+  url: string;
+  final_url: string | null;
+  reachable: boolean;
+  geo_score: number | null;
+  grade: string | null;
+  status: AuditStatus;
+  error: string | null;
+  html_url: string | null;
+  pdf_url: string | null;
+}
+
+export interface CategoryAverage {
+  key: string;
+  name: string;
+  avg_score: number;
+  max_score: number;
+  avg_ratio: number;
+}
+
+export interface GapSummary {
+  category: string;
+  message: string;
+  recommendation: string;
+  severity: "ok" | "warn" | "fail";
+  page_count: number;
+}
+
+export interface BatchAuditResult {
+  audit_id: string;
+  status: AuditStatus;
+  url_count: number;
+  reachable_count: number;
+  avg_score: number | null;
+  grade: string | null;
+  category_averages: CategoryAverage[];
+  top_gaps: GapSummary[];
+  pages: PageSummary[];
+  html_url: string | null;
+  pdf_url: string | null;
+}
+
+export interface BatchInput {
+  urls: string[];
+  client?: string;
+  render_js?: boolean;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -143,6 +198,28 @@ export async function getAudit(auditId: string): Promise<AuditResult> {
     throw new AuthError("Oturum süresi doldu. Lütfen tekrar giriş yapın.");
   }
   if (!res.ok) throw new Error(`Audit alınamadı (HTTP ${res.status}).`);
+  return (await res.json()) as AuditResult;
+}
+
+/**
+ * Confirm (or retract) a manual correction for an ambiguous finding — e.g.
+ * `{ sitemap_exists: true }` after checking the URL by hand. Returns the
+ * audit with the override applied (score/grade/findings already updated).
+ */
+export async function updateOverrides(
+  auditId: string,
+  overrides: Record<string, boolean>,
+): Promise<AuditResult> {
+  const res = await fetch(`${API_BASE_URL}/audits/${auditId}/overrides`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ overrides }),
+  });
+  if (res.status === 401) {
+    clearToken();
+    throw new AuthError("Oturum süresi doldu. Lütfen tekrar giriş yapın.");
+  }
+  if (!res.ok) throw new Error(`Düzeltme kaydedilemedi (HTTP ${res.status}).`);
   return (await res.json()) as AuditResult;
 }
 
@@ -187,6 +264,62 @@ export async function runAudit(
     onStatus?.(result.status);
     await sleep(POLL_INTERVAL_MS);
     result = await getAudit(result.audit_id);
+    attempts += 1;
+  }
+  return result;
+}
+
+/** Fetch a URL-list (batch) audit's current state. */
+export async function getBatch(auditId: string): Promise<BatchAuditResult> {
+  const res = await fetch(`${API_BASE_URL}/audits/batch/${auditId}`, {
+    headers: authHeaders(),
+  });
+  if (res.status === 401) {
+    clearToken();
+    throw new AuthError("Oturum süresi doldu. Lütfen tekrar giriş yapın.");
+  }
+  if (!res.ok) throw new Error(`Liste denetimi alınamadı (HTTP ${res.status}).`);
+  return (await res.json()) as BatchAuditResult;
+}
+
+/** Enqueue a URL-list audit and poll until it reaches a terminal status. */
+export async function runBatch(
+  input: BatchInput,
+  onStatus?: (status: AuditStatus) => void,
+): Promise<BatchAuditResult> {
+  const res = await fetch(`${API_BASE_URL}/audits/batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(input),
+  });
+
+  if (res.status === 401) {
+    clearToken();
+    throw new AuthError("Oturum süresi doldu. Lütfen tekrar giriş yapın.");
+  }
+  if (!res.ok) {
+    let detail = `İstek başarısız (HTTP ${res.status}).`;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = String(body.detail);
+    } catch {
+      /* ignore parse errors */
+    }
+    throw new Error(detail);
+  }
+
+  let result = (await res.json()) as BatchAuditResult;
+  let attempts = 0;
+  // Lists run several pages sequentially — allow more time than a single audit.
+  const maxAttempts = POLL_MAX_ATTEMPTS * 4;
+  while (
+    result.status !== "done" &&
+    result.status !== "error" &&
+    attempts < maxAttempts
+  ) {
+    onStatus?.(result.status);
+    await sleep(POLL_INTERVAL_MS);
+    result = await getBatch(result.audit_id);
     attempts += 1;
   }
   return result;
