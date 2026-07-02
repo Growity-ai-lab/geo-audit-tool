@@ -15,6 +15,7 @@ from geo_audit.crawler import Crawler
 from geo_audit.fetcher import FallbackFetcher, PlaywrightFetcher, RequestsFetcher
 from geo_audit.reporter import render_html
 from geo_audit.scorer import build_render_comparison, looks_like_spa, score
+from geo_audit.targeting import analyze_targeting
 
 from .ai_commentary import generate_commentary
 from .config import settings
@@ -107,6 +108,13 @@ def run_audit(
             logger.warning("compare_render requested but ENABLE_JS_RENDER is off; single run")
         crawl_result, report = _crawl_and_score(req)
 
+    # Page-type/keyword "Hedefleme" overlay (separate from the GEO score).
+    # Computed when the caller specifies a non-generic page type or a keyword.
+    if report.reachable and (req.page_type != "generic" or req.target_keyword.strip()):
+        report.targeting = analyze_targeting(
+            crawl_result.html, req.page_type, req.target_keyword
+        ).to_dict()
+
     # AI-generated narrative commentary (config-gated, like PSI): runs
     # whenever an Anthropic key is set, and degrades to None on any failure so
     # it never breaks the audit.
@@ -136,6 +144,7 @@ def run_audit(
         spa_suspected=data["spa_suspected"],
         render_comparison=data["render_comparison"],
         ai_commentary=data["ai_commentary"],
+        targeting=data["targeting"],
         html_url=f"/audits/{audit_id}/report.html",
         pdf_url=f"/audits/{audit_id}/report.pdf",
         report_html=html,

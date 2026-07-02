@@ -209,6 +209,20 @@ kategori, ürün, blog) girip hepsini tek seferde denetleyebilirsiniz
   en çok sayfayı etkileyen önce) ile bir **birleşik strateji raporu** (HTML/PDF)
   üretilir — tek bir düzeltmenin tüm listeyi nasıl iyileştireceğini gösterir.
 
+### Hedefleme: sayfa türü + hedef anahtar kelime (tek sayfa)
+
+Tek sayfa denetiminde, **sayfa türünü** (Ana sayfa / Kategori / Ürün / Blog /
+Genel) ve opsiyonel bir **hedef anahtar kelimeyi** belirtebilirsiniz. Bu, GEO
+skorunu **etkilemeyen** ayrı bir "Hedefleme" katmanı üretir (skorlar koşullar
+arası karşılaştırılabilir kalır):
+
+- **Anahtar kelime kapsamı** (0-100 alt-skor): kelimenin başlık, H1, meta
+  açıklaması, giriş paragrafı, alt başlıklar ve gövde metninde geçip geçmediği
+  (Türkçe büyük/küçük harf duyarsız — dotless I dahil).
+- **Sayfa türüne özel beklenen şemalar:** ör. Ürün→Product/Offer/AggregateRating,
+  Blog→Article/FAQPage, Ana sayfa→Organization/WebSite — hangileri var/eksik.
+- **FAQ tespiti:** FAQPage şeması veya sayfa içi soru-cevap yapısı.
+
 ### SPA tespiti & "AI vs kullanıcı" render karşılaştırması
 
 İçeriğini JavaScript ile üreten (SPA) siteler, sunucudan **boş bir kabuk**

@@ -120,6 +120,8 @@ export interface AuditResult {
   categories: AuditCategory[];
   spa_suspected: boolean;
   render_comparison: RenderComparison | null;
+  // Page-type/keyword "Hedefleme" overlay (separate from the GEO score).
+  targeting: Targeting | null;
   // Manually confirmed corrections for ambiguous findings, keyed by
   // AuditFinding.override_key (e.g. { sitemap_exists: true }).
   overrides: Record<string, boolean>;
@@ -128,11 +130,43 @@ export interface AuditResult {
   status: AuditStatus;
 }
 
+export interface TargetingCheck {
+  key: string;
+  label: string;
+  present: boolean;
+  weight: number;
+}
+
+export interface SchemaExpectation {
+  type: string;
+  label: string;
+  present: boolean;
+}
+
+export interface TargetingFinding {
+  severity: "ok" | "warn" | "fail";
+  message: string;
+  recommendation: string;
+}
+
+export interface Targeting {
+  page_type: string;
+  page_type_label: string;
+  target_keyword: string;
+  keyword_score: number | null;
+  keyword_checks: TargetingCheck[];
+  schema_expectations: SchemaExpectation[];
+  faq_present: boolean;
+  findings: TargetingFinding[];
+}
+
 export interface AuditInput {
   url: string;
   client?: string;
   render_js?: boolean;
   compare_render?: boolean;
+  page_type?: string;
+  target_keyword?: string;
 }
 
 export interface PageSummary {

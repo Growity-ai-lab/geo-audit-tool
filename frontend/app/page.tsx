@@ -16,7 +16,16 @@ import {
   type BatchAuditResult,
   type CurrentUser,
   type RenderComparison,
+  type Targeting,
 } from "../lib/api";
+
+const PAGE_TYPES: { value: string; label: string }[] = [
+  { value: "generic", label: "Genel" },
+  { value: "homepage", label: "Ana Sayfa" },
+  { value: "category", label: "Kategori" },
+  { value: "product", label: "Ürün" },
+  { value: "blog", label: "Blog / Makale" },
+];
 
 const GRADE_COLORS: Record<string, string> = {
   A: "#22c55e",
@@ -133,6 +142,8 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
   const [client, setClient] = useState("");
   const [renderJs, setRenderJs] = useState(false);
   const [compareRender, setCompareRender] = useState(false);
+  const [pageType, setPageType] = useState("generic");
+  const [targetKeyword, setTargetKeyword] = useState("");
   const [loading, setLoading] = useState(false);
   const [statusText, setStatusText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -158,6 +169,8 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
           client: client.trim() || undefined,
           render_js: renderJs || compareRender,
           compare_render: compareRender,
+          page_type: pageType,
+          target_keyword: targetKeyword.trim() || undefined,
         },
         (s) => setStatusText(s === "queued" ? "Kuyrukta…" : "Çalışıyor…"),
       );
@@ -289,6 +302,33 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
             style={inputStyle}
           />
         </label>
+
+        {mode === "single" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <label style={{ display: "grid", gap: 6 }}>
+              <span>Sayfa türü</span>
+              <select
+                value={pageType}
+                onChange={(e) => setPageType(e.target.value)}
+                style={inputStyle}
+              >
+                {PAGE_TYPES.map((pt) => (
+                  <option key={pt.value} value={pt.value}>{pt.label}</option>
+                ))}
+              </select>
+            </label>
+            <label style={{ display: "grid", gap: 6 }}>
+              <span>Hedef anahtar kelime (opsiyonel)</span>
+              <input
+                type="text"
+                value={targetKeyword}
+                onChange={(e) => setTargetKeyword(e.target.value)}
+                placeholder="ör. ton balığı konservesi"
+                style={inputStyle}
+              />
+            </label>
+          </div>
+        )}
 
         <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <input
@@ -422,6 +462,8 @@ function ResultView({
       )}
 
       <OverridesPanel result={result} onUpdate={onUpdate} />
+
+      {result.targeting && <TargetingView targeting={result.targeting} />}
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         {pdfUrl && (
@@ -734,6 +776,141 @@ function BatchResultView({ result }: { result: BatchAuditResult }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function TargetingView({ targeting: t }: { targeting: Targeting }) {
+  const findingColor = (sev: string) =>
+    sev === "fail" ? "#ef4444" : sev === "warn" ? "#f59e0b" : "#22c55e";
+  const findingBg = (sev: string) =>
+    sev === "fail" ? "#3a1620" : sev === "warn" ? "#3a2e10" : "#12261a";
+
+  return (
+    <div style={{ ...cardStyle, borderColor: "#6d28d9" }}>
+      <h2 style={{ marginTop: 0, fontSize: 18 }}>🎯 Hedefleme — {t.page_type_label}</h2>
+      <p style={{ fontSize: 13, color: "#9fb0c7", marginTop: 0 }}>
+        Sayfa türüne ve hedef anahtar kelimeye özel değerlendirme; GEO skorunu
+        etkilemez.
+      </p>
+
+      {t.keyword_score !== null && (
+        <div
+          style={{
+            background: "#0b1220",
+            border: "1px solid #1f2c47",
+            borderRadius: 10,
+            padding: 14,
+            marginBottom: 14,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              fontSize: 14,
+              marginBottom: 8,
+            }}
+          >
+            <span>
+              Hedef kelime: <b>{t.target_keyword}</b>
+            </span>
+            <span style={{ color: ratioColor((t.keyword_score ?? 0) / 100), fontWeight: 700 }}>
+              {Math.round(t.keyword_score ?? 0)}/100
+            </span>
+          </div>
+          <div style={{ height: 8, borderRadius: 4, background: "#1f2c47", overflow: "hidden" }}>
+            <div
+              style={{
+                width: `${Math.round(t.keyword_score ?? 0)}%`,
+                height: "100%",
+                background: ratioColor((t.keyword_score ?? 0) / 100),
+              }}
+            />
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "6px 18px",
+              marginTop: 12,
+            }}
+          >
+            {t.keyword_checks.map((c) => (
+              <div key={c.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                <span style={{ color: c.present ? "#22c55e" : "#ef4444", fontWeight: 800 }}>
+                  {c.present ? "✓" : "✗"}
+                </span>
+                <span>{c.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {t.schema_expectations.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#9fb0c7", textTransform: "uppercase", marginBottom: 8 }}>
+            Bu sayfa türü için beklenen şemalar
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {t.schema_expectations.map((e) => (
+              <span
+                key={e.type}
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  padding: "4px 10px",
+                  borderRadius: 999,
+                  background: e.present ? "#12261a" : "#3a2e10",
+                  color: e.present ? "#22c55e" : "#f59e0b",
+                  border: `1px solid ${e.present ? "#1f4a30" : "#5a4410"}`,
+                }}
+              >
+                {e.present ? "✓" : "✗"} {e.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "grid", gap: 4 }}>
+        {t.findings.map((f, i) => (
+          <div
+            key={i}
+            style={{
+              display: "flex",
+              gap: 10,
+              alignItems: "flex-start",
+              padding: "8px 0",
+              borderTop: i === 0 ? "none" : "1px solid #1f2c47",
+            }}
+          >
+            <span
+              style={{
+                flexShrink: 0,
+                width: 20,
+                height: 20,
+                borderRadius: "50%",
+                background: findingBg(f.severity),
+                color: findingColor(f.severity),
+                textAlign: "center",
+                lineHeight: "20px",
+                fontWeight: 800,
+                fontSize: 12,
+              }}
+            >
+              {f.severity === "ok" ? "✓" : f.severity === "fail" ? "✗" : "!"}
+            </span>
+            <div>
+              <div style={{ fontSize: 14 }}>{f.message}</div>
+              {f.recommendation && (
+                <div style={{ fontSize: 13, color: "#9fb0c7", marginTop: 2 }}>{f.recommendation}</div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

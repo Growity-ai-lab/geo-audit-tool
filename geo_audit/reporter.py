@@ -372,11 +372,86 @@ def render_html(
     offering = _offering_block(brand)
 
     gap = _render_gap_block(report)
+    targeting = _targeting_block(report)
     body = (
-        cover + summary + ai_summary + gap + explain + priority
+        cover + summary + ai_summary + gap + targeting + explain + priority
         + "".join(cat_blocks) + offering
     )
     return _html_shell(logo_html, brand, report.final_url, when, body)
+
+
+def _targeting_block(report: AuditReport) -> str:
+    """Render the page-type/keyword "Hedefleme" overlay, or nothing."""
+    t = report.targeting
+    if not t:
+        return ""
+
+    # Keyword coverage (only when a keyword was given).
+    kw_html = ""
+    if t.get("keyword_score") is not None:
+        score = t["keyword_score"]
+        color = _hue(score / 100)
+        checks = "".join(
+            f"""<div class="kwcheck">
+                  <span class="kwdot" style="background:{'#16a34a' if c['present'] else '#dc2626'}">{'✓' if c['present'] else '✗'}</span>
+                  <span>{_esc(c['label'])}</span>
+                </div>"""
+            for c in t.get("keyword_checks", [])
+        )
+        kw_html = f"""
+      <div class="tgt-kw">
+        <div class="tgt-kw-head">
+          <span>Hedef kelime: <b>{_esc(t['target_keyword'])}</b></span>
+          <span style="color:{color};font-weight:800">{score:.0f}<span style="color:var(--muted);font-weight:700;font-size:12px">/100</span></span>
+        </div>
+        <div class="bar"><div class="bar-fill" style="width:{score:.0f}%;background:{color}"></div></div>
+        <div class="kwchecks">{checks}</div>
+      </div>"""
+
+    # Expected-schema chips for this page type.
+    exp = t.get("schema_expectations", [])
+    exp_html = ""
+    if exp:
+        chips = "".join(
+            f'<span class="schemachip {"on" if e["present"] else "off"}">'
+            f'{"✓" if e["present"] else "✗"} {_esc(e["label"])}</span>'
+            for e in exp
+        )
+        exp_html = f"""
+      <div class="tgt-schemas">
+        <div class="tgt-sub">Bu sayfa türü için beklenen şemalar</div>
+        <div class="chips">{chips}</div>
+      </div>"""
+
+    # Advisory findings.
+    findings = t.get("findings", [])
+    find_html = ""
+    if findings:
+        items = ""
+        for f in findings:
+            cls = {OK: "ok", WARN: "warn", FAIL: "fail"}.get(f["severity"], "warn")
+            ic = {OK: "✓", WARN: "!", FAIL: "✗"}.get(f["severity"], "!")
+            rec = (
+                f'<div class="rec">{_esc(f["recommendation"])}</div>'
+                if f.get("recommendation") else ""
+            )
+            items += f"""
+            <li class="finding {cls}">
+              <span class="ficon">{ic}</span>
+              <div><div class="fmsg">{_esc(f["message"])}</div>{rec}</div>
+            </li>"""
+        find_html = f'<ul class="findings" style="margin-top:6px">{items}</ul>'
+
+    return f"""
+    <section class="card targeting">
+      <h2><span class="h2-accent"></span>🎯 Hedefleme — {_esc(t['page_type_label'])}</h2>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px">Bu bölüm, sayfa
+      türüne ve hedef anahtar kelimeye özel bir değerlendirmedir; GEO skorunu
+      etkilemez.</p>
+      {kw_html}
+      {exp_html}
+      {find_html}
+    </section>"""
 
 
 # Grade bands shown in the explainer legend.
@@ -600,6 +675,20 @@ def _html_shell(logo_html, brand, url, when, body) -> str:
               font-size:13px; color:var(--ink); }}
   .ai-note-tag {{ display:inline-block; font-size:10.5px; font-weight:800; letter-spacing:.06em;
                   text-transform:uppercase; color:var(--brand); margin-right:8px; }}
+
+  /* Targeting (Hedefleme) */
+  .tgt-kw {{ background:var(--tint); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:14px; }}
+  .tgt-kw-head {{ display:flex; justify-content:space-between; align-items:center; font-size:14px; margin-bottom:8px; }}
+  .kwchecks {{ display:grid; grid-template-columns:1fr 1fr; gap:6px 18px; margin-top:12px; }}
+  .kwcheck {{ display:flex; align-items:center; gap:8px; font-size:13px; }}
+  .kwdot {{ flex:none; width:18px; height:18px; border-radius:50%; color:#fff; font-size:11px;
+            font-weight:800; text-align:center; line-height:18px; }}
+  .tgt-sub {{ font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px; }}
+  .chips {{ display:flex; flex-wrap:wrap; gap:8px; }}
+  .schemachip {{ font-size:12.5px; font-weight:600; padding:4px 10px; border-radius:999px; border:1px solid var(--line); }}
+  .schemachip.on {{ background:#dcfce7; color:#15803d; border-color:#bbf7d0; }}
+  .schemachip.off {{ background:#fef3c7; color:#b45309; border-color:#fde68a; }}
+  .tgt-schemas {{ margin-bottom:6px; }}
 
   /* Explainer + bands */
   .explain p {{ margin:0 0 16px; font-size:14px; }}

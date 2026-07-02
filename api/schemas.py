@@ -29,6 +29,16 @@ class AuditRequest(BaseModel):
         description="Audit twice (raw HTML vs JS-rendered) and report the gap — "
         "'what AI crawlers see' vs 'what users see'. Implies JS rendering.",
     )
+    page_type: str = Field(
+        "generic",
+        description="Page type for the targeting overlay (homepage|category|"
+        "product|blog|generic). Tailors expected schema + recommendations.",
+    )
+    target_keyword: str = Field(
+        "",
+        description="Target keyword; when set, a coverage analysis (title/H1/"
+        "meta/lead/headings/body) is reported. Does not affect the GEO score.",
+    )
 
 
 class CategoryFinding(BaseModel):
@@ -74,6 +84,9 @@ class AuditResponse(BaseModel):
     # AI-generated narrative commentary (executive summary + per-category
     # rationale), or None if ANTHROPIC_API_KEY isn't set / generation failed.
     ai_commentary: Optional[dict] = None
+    # Page-type/keyword "Hedefleme" overlay (separate from the GEO score),
+    # or None when no page type / keyword was supplied.
+    targeting: Optional[dict] = None
     # Manually confirmed corrections for ambiguous findings (see
     # CategoryFinding.override_key), applied on top of the automated result.
     overrides: Dict[str, bool] = {}
