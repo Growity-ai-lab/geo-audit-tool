@@ -12,6 +12,7 @@ from typing import List, Optional
 
 from . import FAIL, OK, WARN
 from .aggregate import AggregateReport
+from .ai_visibility import VisibilityReport
 from .scorer import AuditReport, CATEGORY_ORDER, grade_description
 
 # ANSI colors (auto-disabled when output is not a TTY).
@@ -882,6 +883,195 @@ def render_list_html(
 </style>""".replace("{{", "{").replace("}}", "}"),
         1,
     )
+
+
+def _visibility_label(score: float) -> str:
+    if score >= 70:
+        return "Güçlü"
+    if score >= 45:
+        return "Orta"
+    if score >= 20:
+        return "Düşük"
+    return "Çok Düşük"
+
+
+def _vis_status_pill(er: dict) -> str:
+    """Per-engine status pill with sample ratios (mention/citation over N)."""
+    eng = _esc(er["engine"])
+    n = er.get("samples", 1) or 1
+    if er.get("status") == "cited":
+        return (f'<span class="vpill st-cited"><span class="vdot">✓</span>{eng} · '
+                f'{er["citation_count"]}/{n} kaynak</span>')
+    if er.get("status") == "mentioned":
+        return (f'<span class="vpill st-ment"><span class="vdot">●</span>{eng} · '
+                f'{er["mention_count"]}/{n} anıldı</span>')
+    return f'<span class="vpill st-none"><span class="vdot">✗</span>{eng} · anılmadı</span>'
+
+
+def render_visibility_html(
+    report: VisibilityReport, brand: str = "Growity", logo: str = "",
+    generated_at: Optional[str] = None,
+) -> str:
+    """Render the AI Visibility report (separate from the GEO score)."""
+    d = report.to_dict() if hasattr(report, "to_dict") else report
+    when = d.get("generated_at") or generated_at or datetime.now().strftime("%d.%m.%Y %H:%M")
+    logo_html = _logo_markup(brand, logo)
+
+    score = d["score"]
+    ratio = score / 100 if score else 0
+    color = _hue(ratio)
+    deg = round(ratio * 360)
+
+    cover = f"""
+    <section class="cover">
+      <div class="cover-l">
+        <div class="eyebrow">AI GÖRÜNÜRLÜK ANALİZİ</div>
+        <h1>{_esc(d['brand'])}</h1>
+        <a class="cover-url">{_esc(d['domain'])}</a>
+        <div class="cover-meta">{d['prompt_count']} prompt · {len(d['engines_used'])} motor ·
+        her prompt {d['sample_count']} kez örneklendi · {_esc(when)}</div>
+      </div>
+      <div class="cover-r">
+        <div class="gauge" style="background:conic-gradient(#ffffff {deg}deg, rgba(255,255,255,.22) 0deg);">
+          <div class="gauge-inner">
+            <div class="score" style="color:{color}">{score:.0f}<span class="of">/100</span></div>
+            <div class="grade" style="color:{color}">{_visibility_label(score)}</div>
+          </div>
+        </div>
+      </div>
+    </section>"""
+
+    n_comp = len(d.get("competitor_ranking", []))
+    summary = f"""
+    <section class="summary">
+      <div class="stats" style="width:100%;justify-content:space-around">
+        <div class="stat stat-ok"><b>{d['mention_total']}</b><span>anılma ({d['slot_total']} sonuçtan)</span></div>
+        <div class="stat stat-warn"><b>{d['citation_total']}</b><span>kaynak gösterme</span></div>
+        <div class="stat stat-fail"><b>{n_comp}</b><span>farklı rakip marka</span></div>
+      </div>
+    </section>"""
+
+    # Engine distribution.
+    stats = d.get("engine_stats", [])
+    max_m = max((s["mention_count"] for s in stats), default=0) or 1
+    eng_rows = ""
+    for s in stats:
+        w = round(s["mention_count"] / max_m * 100)
+        eng_rows += f"""
+      <div class="vengine">
+        <div class="vengine-head">
+          <span>{_esc(s['engine'])}</span>
+          <span class="vengine-nums"><b>{s['mention_count']}</b> anılma · <b>{s['citation_count']}</b> kaynak</span>
+        </div>
+        <div class="bar"><div class="bar-fill" style="width:{w}%"></div></div>
+      </div>"""
+    engines_block = f"""
+    <section class="card">
+      <h2><span class="h2-accent"></span>Motor Dağılımı</h2>
+      {eng_rows}
+    </section>"""
+
+    # Competitor + source ranking.
+    comp = d.get("competitor_ranking", [])
+    max_c = max((c["count"] for c in comp), default=0) or 1
+    comp_rows = "".join(
+        f'<div class="vrank"><span class="nm">{_esc(c["name"])}</span>'
+        f'<span class="minibar"><div style="width:{round(c["count"]/max_c*100)}%"></div></span>'
+        f'<span class="ct">{c["count"]} yanıt</span></div>'
+        for c in comp
+    ) or '<div class="vrank"><span class="nm" style="color:var(--muted)">Rakip tespit edilmedi.</span></div>'
+    src = d.get("source_ranking", [])
+    src_rows = "".join(
+        f'<div class="vrank"><span class="nm">{_esc(s["domain"])}'
+        + (' <span class="ours">SİZ</span>' if s.get("is_ours") else "")
+        + f'</span><span class="ct">{s["count"]} kez</span></div>'
+        for s in src
+    ) or '<div class="vrank"><span class="nm" style="color:var(--muted)">Kaynak gösterilmedi.</span></div>'
+    ranks_block = f"""
+    <div class="vtwo">
+      <section class="card"><h2><span class="h2-accent"></span>Rakip Markalar</h2>{comp_rows}</section>
+      <section class="card"><h2><span class="h2-accent"></span>Öne Çıkan Kaynaklar</h2>{src_rows}</section>
+    </div>"""
+
+    # Detailed prompt cards.
+    prompt_cards = ""
+    for pr in d.get("prompts", []):
+        pills = "".join(_vis_status_pill(er) for er in pr["engines"])
+        # Representative response: best-status engine (cited > mentioned > absent).
+        rank = {"cited": 0, "mentioned": 1, "absent": 2}
+        best = min(pr["engines"], key=lambda er: rank.get(er["status"], 3), default=None)
+        excerpt = ""
+        if best and best.get("response_excerpt"):
+            excerpt = f"""<div class="vresp"><span class="eng">{_esc(best['engine'])} yanıtı:</span>
+              {_esc(best['response_excerpt'])}…</div>"""
+        comps = sorted({c for er in pr["engines"] for c in er.get("competitors", [])})
+        srcs = sorted({s for er in pr["engines"] for s in er.get("sources", [])})
+        comp_chips = "".join(f'<span class="brandchip">{_esc(c)}</span>' for c in comps) or \
+            '<span style="color:var(--muted);font-size:12.5px">—</span>'
+        src_items = "".join(f'<li><a>{_esc(s)}</a></li>' for s in srcs[:6]) or \
+            '<li style="color:var(--muted)">—</li>'
+        src_label = "manuel girildi" if pr["source"] == "manual" else "otomatik üretildi"
+        prompt_cards += f"""
+      <div class="vpcard">
+        <div class="vpq">{_esc(pr['prompt'])}</div>
+        <div class="vpsrc">Kaynak: <b>{src_label}</b></div>
+        <div class="vpills">{pills}</div>
+        {excerpt}
+        <div class="vdetail">
+          <div><div class="vdt">Yanıtta geçen rakipler</div>{comp_chips}</div>
+          <div><div class="vdt">Gösterilen kaynaklar</div><ul class="vsrclist">{src_items}</ul></div>
+        </div>
+      </div>"""
+    prompts_block = f"""
+    <section class="card">
+      <h2><span class="h2-accent"></span>Prompt Bazlı Sonuçlar — Detaylı</h2>
+      {prompt_cards}
+    </section>"""
+
+    models = ", ".join(f"{k}: {v}" for k, v in (d.get("models_used") or {}).items() if v)
+    note = f"""
+    <section class="card note">
+      <h2><span class="h2-accent"></span>Bu skor GEO skorundan ayrıdır</h2>
+      <p>AI Görünürlük, sitenin <b>AI motorlarının cevaplarında ne kadar göründüğünü</b> ölçer
+      (off-site). GEO Hazırlık skoru sitenin <b>AI için ne kadar hazır olduğunu</b> ölçer (on-site).
+      LLM yanıtları non-deterministik olduğu için her prompt {d['sample_count']} kez örneklendi.</p>
+      <p style="margin-top:10px;font-size:12px;color:var(--muted)">Bu analiz {d['api_calls']} API
+      çağrısı kullandı{('· Modeller — ' + _esc(models)) if models else ''}.</p>
+    </section>"""
+
+    body = cover + summary + engines_block + ranks_block + prompts_block + note
+    shell = _html_shell(logo_html, brand, d["domain"], when, body)
+    css = """
+  .note {{ background:linear-gradient(135deg,var(--tint),#fff); border-color:var(--brand); }}
+  .note p {{ margin:0; font-size:13.5px; }}
+  .vtwo {{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }}
+  .vengine {{ margin-bottom:12px; }} .vengine:last-child {{ margin-bottom:0; }}
+  .vengine-head {{ display:flex; justify-content:space-between; align-items:center; font-size:14px; margin-bottom:6px; font-weight:600; }}
+  .vengine-nums {{ color:var(--muted); font-size:13px; font-weight:400; }} .vengine-nums b {{ color:var(--ink); }}
+  .vrank {{ display:flex; align-items:center; gap:12px; padding:9px 0; border-top:1px solid var(--line); font-size:13.5px; }}
+  .vrank:first-of-type {{ border-top:none; }} .vrank .nm {{ flex:1; font-weight:600; }} .vrank .ct {{ color:var(--muted); font-size:12.5px; }}
+  .minibar {{ width:110px; height:7px; background:#eef0f5; border-radius:999px; overflow:hidden; }}
+  .minibar > div {{ height:100%; background:#a78bfa; }}
+  .ours {{ background:var(--tint); border:1px solid var(--brand); border-radius:6px; padding:1px 7px; font-size:10.5px; font-weight:800; color:var(--brand); }}
+  .vpcard {{ border:1px solid var(--line); border-radius:14px; padding:16px 18px; margin-bottom:14px; }}
+  .vpcard:last-child {{ margin-bottom:0; }}
+  .vpq {{ font-weight:700; font-size:15px; margin-bottom:4px; }}
+  .vpsrc {{ font-size:12px; color:var(--muted); margin-bottom:12px; }} .vpsrc b {{ color:var(--brand); }}
+  .vpills {{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }}
+  .vpill {{ display:flex; align-items:center; gap:7px; font-size:12.5px; font-weight:600; border:1px solid var(--line); border-radius:999px; padding:4px 11px 4px 5px; }}
+  .vdot {{ width:20px; height:20px; border-radius:50%; color:#fff; font-size:11px; font-weight:800; display:inline-flex; align-items:center; justify-content:center; }}
+  .st-cited {{ color:#15803d; }} .st-cited .vdot {{ background:#16a34a; }}
+  .st-ment {{ color:#4338ca; }} .st-ment .vdot {{ background:#6366f1; }}
+  .st-none {{ color:#b91c1c; }} .st-none .vdot {{ background:#dc2626; }}
+  .vresp {{ background:#faf9fe; border-left:3px solid var(--brand); border-radius:0 8px 8px 0; padding:12px 14px; font-size:13px; color:#3f3f46; margin-bottom:12px; }}
+  .vresp .eng {{ font-weight:700; color:var(--ink); }}
+  .vdetail {{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }}
+  .vdt {{ font-size:11px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin-bottom:8px; }}
+  .brandchip {{ display:inline-block; font-size:12.5px; font-weight:600; padding:4px 10px; border-radius:999px; background:#f1f5f9; color:#334155; margin:0 6px 6px 0; }}
+  .vsrclist {{ margin:0; padding:0; list-style:none; }}
+  .vsrclist li {{ font-size:12.5px; padding:3px 0; }} .vsrclist a {{ color:#3730a3; word-break:break-all; }}
+</style>""".replace("{{", "{").replace("}}", "}")
+    return shell.replace("</style>", css, 1)
 
 
 def export_html(

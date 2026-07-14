@@ -20,6 +20,8 @@ from ..schemas import (
     BatchAuditRequest,
     BatchAuditResponse,
     OverrideUpdate,
+    VisibilityRequest,
+    VisibilityResponse,
 )
 
 router = APIRouter(tags=["audits"])
@@ -118,6 +120,53 @@ def get_batch_audit(
     if parent is None:
         raise HTTPException(status_code=404, detail="list audit not found")
     return repository.to_batch_response(parent)
+
+
+@router.post("/audits/ai-visibility", response_model=VisibilityResponse, status_code=202)
+def create_visibility_audit(
+    req: VisibilityRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+) -> VisibilityResponse:
+    """Enqueue an AI Visibility run (off-site: is the brand in LLM answers?)."""
+    if not req.brand.strip() or not req.domain.strip():
+        raise HTTPException(status_code=422, detail="brand and domain are required")
+
+    client_name: Optional[str] = None
+    if req.client_id:
+        client = repository.get_client(db, req.client_id)
+        if client is None:
+            raise HTTPException(status_code=404, detail="client not found")
+        client_name = client.name
+
+    audit_id = uuid.uuid4().hex
+    repository.create_visibility_parent(db, audit_id=audit_id, req=req, user_id=current_user.id)
+
+    tasks.run_visibility_task.delay(
+        audit_id=audit_id,
+        brand=req.brand,
+        domain=req.domain,
+        topic=req.topic,
+        aliases=req.aliases,
+        manual_prompts=req.manual_prompts,
+        client_name=client_name,
+    )
+
+    db.expire_all()
+    audit = repository.get_audit(db, audit_id)
+    return repository.to_visibility_response(audit)
+
+
+@router.get("/audits/ai-visibility/{audit_id}", response_model=VisibilityResponse)
+def get_visibility_audit(
+    audit_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+) -> VisibilityResponse:
+    audit = repository.get_audit(db, audit_id)
+    if audit is None or audit.scope != "ai_visibility":
+        raise HTTPException(status_code=404, detail="visibility audit not found")
+    return repository.to_visibility_response(audit)
 
 
 @router.get("/audits", response_model=AuditListResponse)

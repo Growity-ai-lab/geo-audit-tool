@@ -68,6 +68,45 @@ class Settings:
         )
     )
 
+    # --- AI Visibility (#5): off-site "does the brand show up in LLM answers"
+    # Config-gated per engine — an engine runs only if its key is set. Claude
+    # is additionally opt-in (ENABLE_CLAUDE_VISIBILITY). Sampling/prompt/budget
+    # caps bound the (paid) cost per run.
+    openai_api_key: str = field(
+        default_factory=lambda: os.environ.get("OPENAI_API_KEY", "")
+    )
+    perplexity_api_key: str = field(
+        default_factory=lambda: os.environ.get("PERPLEXITY_API_KEY", "")
+    )
+    gemini_api_key: str = field(
+        default_factory=lambda: os.environ.get("GEMINI_API_KEY", "")
+    )
+    openai_model: str = field(
+        default_factory=lambda: os.environ.get("OPENAI_MODEL", "gpt-4o")
+    )
+    perplexity_model: str = field(
+        default_factory=lambda: os.environ.get("PERPLEXITY_MODEL", "sonar")
+    )
+    gemini_model: str = field(
+        default_factory=lambda: os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    )
+    enable_claude_visibility: bool = field(
+        default_factory=lambda: os.environ.get(
+            "ENABLE_CLAUDE_VISIBILITY", "false"
+        ).lower()
+        in ("1", "true", "yes")
+    )
+    visibility_sample_count: int = field(
+        default_factory=lambda: int(os.environ.get("VISIBILITY_SAMPLE_COUNT", "2"))
+    )
+    visibility_max_prompts: int = field(
+        default_factory=lambda: int(os.environ.get("VISIBILITY_MAX_PROMPTS", "10"))
+    )
+    # Hard cap on total external API calls per run (cost kill-switch).
+    visibility_max_api_calls: int = field(
+        default_factory=lambda: int(os.environ.get("VISIBILITY_MAX_API_CALLS", "120"))
+    )
+
     # --- Auth (A3) -------------------------------------------------------- #
     # JWT signing secret. MUST be set in production; a dev fallback is used
     # locally (with a warning) so the app runs out-of-the-box.

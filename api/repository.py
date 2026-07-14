@@ -23,6 +23,8 @@ from .schemas import (
     ClientCreate,
     ClientUpdate,
     PageSummary,
+    VisibilityRequest,
+    VisibilityResponse,
 )
 
 
@@ -144,6 +146,40 @@ def to_batch_response(parent: models.Audit) -> BatchAuditResponse:
         user_id=parent.user_id,
         created_at=parent.created_at,
         completed_at=parent.completed_at,
+    )
+
+
+def create_visibility_parent(
+    db: Session, *, audit_id: str, req: VisibilityRequest, user_id: Optional[str]
+) -> models.Audit:
+    """Create the placeholder 'ai_visibility' audit row before processing."""
+    audit = models.Audit(
+        id=audit_id,
+        client_id=req.client_id,
+        user_id=user_id,
+        url=req.domain,
+        scope="ai_visibility",
+        status="queued",
+    )
+    db.add(audit)
+    db.commit()
+    db.refresh(audit)
+    return audit
+
+
+def to_visibility_response(audit: models.Audit) -> VisibilityResponse:
+    """Build a VisibilityResponse from a stored 'ai_visibility' audit row."""
+    return VisibilityResponse(
+        audit_id=audit.id,
+        status=audit.status,
+        report=audit.report_json or None,
+        html_url=audit.html_url,
+        pdf_url=audit.pdf_url,
+        error=audit.error,
+        client_id=audit.client_id,
+        user_id=audit.user_id,
+        created_at=audit.created_at,
+        completed_at=audit.completed_at,
     )
 
 

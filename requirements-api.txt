@@ -17,3 +17,7 @@ playwright==1.49.1
 # AI-generated report commentary (executive summary + per-category rationale).
 # Config-gated: only used when ANTHROPIC_API_KEY is set.
 anthropic>=0.40.0
+# AI Visibility (#5) — LLM engine adapters. Config-gated: each engine runs
+# only when its API key is set. Perplexity uses the REST API via requests.
+openai>=1.40.0
+google-genai>=0.3.0
