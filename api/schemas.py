@@ -212,6 +212,39 @@ class BatchAuditResponse(BaseModel):
     completed_at: Optional[datetime] = None
 
 
+# --- AI Visibility (#5) --------------------------------------------------- #
+
+
+class VisibilityRequest(BaseModel):
+    """Payload for ``POST /audits/ai-visibility``."""
+
+    brand: str = Field(..., min_length=1, description="Brand name to look for in LLM answers.")
+    domain: str = Field(..., min_length=1, description="Domain to check for citations.")
+    topic: str = Field("", description="Sector/topic for auto-generated prompts (defaults to brand).")
+    aliases: List[str] = Field(default_factory=list, description="Alternative brand spellings.")
+    manual_prompts: List[str] = Field(
+        default_factory=list, description="Operator-supplied prompts (run alongside auto ones)."
+    )
+    client_id: Optional[str] = Field(None, description="Link to a stored client.")
+    client: str = Field("", description="Client name shown on the report cover.")
+
+
+class VisibilityResponse(BaseModel):
+    """A single AI Visibility run (POST result + GET poll)."""
+
+    audit_id: str
+    status: str = "queued"
+    # The full VisibilityReport.to_dict(), present once status is 'done'.
+    report: Optional[dict] = None
+    html_url: Optional[str] = None
+    pdf_url: Optional[str] = None
+    error: Optional[str] = None
+    client_id: Optional[str] = None
+    user_id: Optional[str] = None
+    created_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
 # --- Clients -------------------------------------------------------------- #
 
 

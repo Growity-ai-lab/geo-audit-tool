@@ -52,6 +52,11 @@ services:
       # AI report commentary. Set ANTHROPIC_API_KEY to enable.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - AI_COMMENTARY_MODEL=${AI_COMMENTARY_MODEL:-claude-haiku-4-5}
+      # AI Visibility (#5). Each engine runs only if its key is set.
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - ENABLE_CLAUDE_VISIBILITY=${ENABLE_CLAUDE_VISIBILITY:-false}
       # Auth (A3). Override these for any non-local deployment.
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-local-dev-secret-change-me-0123456789abcd}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@growity.local}
@@ -76,6 +81,11 @@ services:
       - PSI_STRATEGY=${PSI_STRATEGY:-mobile}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - AI_COMMENTARY_MODEL=${AI_COMMENTARY_MODEL:-claude-haiku-4-5}
+      # AI Visibility (#5) — runs in the worker.
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - ENABLE_CLAUDE_VISIBILITY=${ENABLE_CLAUDE_VISIBILITY:-false}
     depends_on:
       db:
         condition: service_healthy

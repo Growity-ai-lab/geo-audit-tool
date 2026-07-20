@@ -79,3 +79,30 @@ def test_targeting_absent_renders_nothing():
     out = render_html(_report())  # no targeting set
     assert "card targeting" not in out  # the card section isn't emitted
     assert "Hedef kelime" not in out
+
+
+def test_visibility_report_renders_sections():
+    from geo_audit.ai_visibility import EngineQueryResult, analyze_visibility, build_prompts
+    from geo_audit.reporter import render_visibility_html
+
+    class _FE:
+        def __init__(self, name):
+            self.name = name
+            self.model = "m"
+
+        def query(self, prompt):
+            return EngineQueryResult(text="Tara Robotik iyi bir firma.", sources=["tararobotik.com/x"])
+
+    ps = build_prompts("Tara Robotik", max_prompts=1)
+    rep = analyze_visibility(
+        brand="Tara Robotik", domain="tararobotik.com", prompts=ps,
+        engines=[_FE("ChatGPT")], sample_count=2, max_api_calls=50, generated_at="14.07.2026",
+    )
+    out = render_visibility_html(rep, brand="Growity")
+    assert "<!DOCTYPE html>" in out
+    assert out.count("</style>") == 1  # extra CSS injected exactly once
+    assert "AI GÖRÜNÜRLÜK" in out
+    assert "Motor Dağılımı" in out
+    assert "Prompt Bazlı Sonuçlar" in out
+    assert "SİZ" in out  # our domain flagged in source ranking
+    assert "2/2" in out  # sample-ratio pill

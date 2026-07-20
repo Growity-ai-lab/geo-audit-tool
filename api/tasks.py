@@ -12,7 +12,9 @@ import uuid
 from datetime import datetime, timezone
 
 from geo_audit.aggregate import aggregate_reports
-from geo_audit.reporter import render_list_html
+from geo_audit.ai_engines import build_engines, build_extractor
+from geo_audit.ai_visibility import analyze_visibility, build_prompts
+from geo_audit.reporter import render_list_html, render_visibility_html
 from geo_audit.scorer import AuditReport
 
 from . import db, models, repository, service
@@ -170,5 +172,92 @@ def run_batch_task(
             parent.completed_at = datetime.now(timezone.utc)
             session.commit()
         return "error"
+    finally:
+        session.close()
+
+
+@celery_app.task(name="api.tasks.run_visibility")
+def run_visibility_task(
+    audit_id: str,
+    brand: str,
+    domain: str,
+    topic: str,
+    aliases: list[str],
+    manual_prompts: list[str],
+    client_name: str | None,
+) -> str:
+    """Run an AI Visibility analysis: build prompts, query the configured LLM
+    engines, aggregate mention/citation results, and render the report.
+
+    Engines are config-gated (only those with an API key run); if none are
+    configured the run errors cleanly. A budget cap bounds total API calls."""
+    session = db.SessionLocal()
+    try:
+        audit = session.get(models.Audit, audit_id)
+        if audit is None:
+            logger.warning("run_visibility_task: audit %s not found", audit_id)
+            return "error"
+        audit.status = "running"
+        session.commit()
+
+        try:
+            engines = build_engines(
+                openai_key=settings.openai_api_key,
+                perplexity_key=settings.perplexity_api_key,
+                gemini_key=settings.gemini_api_key,
+                claude_key=settings.anthropic_api_key,
+                openai_model=settings.openai_model,
+                perplexity_model=settings.perplexity_model,
+                gemini_model=settings.gemini_model,
+                claude_model=settings.ai_commentary_model,
+                enable_claude=settings.enable_claude_visibility,
+            )
+            if not engines:
+                raise RuntimeError(
+                    "Hiçbir AI motoru yapılandırılmadı — OPENAI/PERPLEXITY/GEMINI "
+                    "API anahtarlarından en az birini ayarlayın."
+                )
+            extractor = build_extractor(
+                openai_key=settings.openai_api_key,
+                anthropic_key=settings.anthropic_api_key,
+            )
+            prompts = build_prompts(
+                brand, topic=topic, manual_prompts=manual_prompts,
+                max_prompts=settings.visibility_max_prompts,
+            )
+            report = analyze_visibility(
+                brand=brand,
+                domain=domain,
+                prompts=prompts,
+                engines=engines,
+                extractor=extractor,
+                sample_count=settings.visibility_sample_count,
+                max_api_calls=settings.visibility_max_api_calls,
+                aliases=tuple(aliases or ()),
+            )
+            brand_name = settings.default_brand
+            audit.report_json = report.to_dict()
+            audit.report_html = render_visibility_html(
+                report, brand=brand_name
+            )
+            audit.geo_score = round(report.score, 1)
+            audit.grade = report.grade
+            audit.reachable = True
+            audit.html_url = f"/audits/{audit_id}/report.html"
+            audit.pdf_url = f"/audits/{audit_id}/report.pdf"
+            audit.status = "done"
+            audit.completed_at = datetime.now(timezone.utc)
+            session.commit()
+            return "done"
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("run_visibility_task failed for %s", audit_id)
+            session.rollback()
+            audit = session.get(models.Audit, audit_id)
+            if audit is not None:
+                audit.status = "error"
+                audit.error = str(exc)
+                audit.completed_at = datetime.now(timezone.utc)
+                session.commit()
+            return "error"
     finally:
         session.close()

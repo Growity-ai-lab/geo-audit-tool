@@ -10,6 +10,7 @@ import {
   login,
   runAudit,
   runBatch,
+  runVisibility,
   updateOverrides,
   type AuditFinding,
   type AuditResult,
@@ -17,6 +18,9 @@ import {
   type CurrentUser,
   type RenderComparison,
   type Targeting,
+  type VisEngineResult,
+  type VisibilityReport,
+  type VisibilityResult,
 } from "../lib/api";
 
 const PAGE_TYPES: { value: string; label: string }[] = [
@@ -133,7 +137,7 @@ function LoginForm({ onSuccess }: { onSuccess: (u: CurrentUser) => void }) {
   );
 }
 
-type Mode = "single" | "list";
+type Mode = "single" | "list" | "visibility";
 
 function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void }) {
   const [mode, setMode] = useState<Mode>("single");
@@ -144,16 +148,53 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
   const [compareRender, setCompareRender] = useState(false);
   const [pageType, setPageType] = useState("generic");
   const [targetKeyword, setTargetKeyword] = useState("");
+  // AI Visibility inputs.
+  const [brand, setBrand] = useState("");
+  const [domain, setDomain] = useState("");
+  const [topic, setTopic] = useState("");
+  const [manualPromptsText, setManualPromptsText] = useState("");
   const [loading, setLoading] = useState(false);
   const [statusText, setStatusText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AuditResult | null>(null);
   const [batchResult, setBatchResult] = useState<BatchAuditResult | null>(null);
+  const [visResult, setVisResult] = useState<VisibilityResult | null>(null);
 
   function reset() {
     setResult(null);
     setBatchResult(null);
+    setVisResult(null);
     setError(null);
+  }
+
+  async function onSubmitVisibility(e: React.FormEvent) {
+    e.preventDefault();
+    if (!brand.trim() || !domain.trim()) return;
+    setLoading(true);
+    setStatusText(null);
+    reset();
+    try {
+      const res = await runVisibility(
+        {
+          brand: brand.trim(),
+          domain: domain.trim(),
+          topic: topic.trim() || undefined,
+          manual_prompts: manualPromptsText
+            .split("\n")
+            .map((p) => p.trim())
+            .filter(Boolean),
+        },
+        (s) => setStatusText(s === "queued" ? "Kuyrukta…" : "AI motorları sorgulanıyor…"),
+      );
+      if (res.status === "error") setError(res.error || "Görünürlük analizi başarısız oldu.");
+      else setVisResult(res);
+    } catch (err) {
+      if (err instanceof AuthError) return onLogout();
+      setError(err instanceof Error ? err.message : "Bilinmeyen hata.");
+    } finally {
+      setLoading(false);
+      setStatusText(null);
+    }
   }
 
   async function onSubmitSingle(e: React.FormEvent) {
@@ -237,24 +278,21 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
 
       {/* Mode toggle */}
       <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
-        <button
-          type="button"
-          onClick={() => { setMode("single"); reset(); }}
-          style={tabStyle(mode === "single")}
-        >
+        <button type="button" onClick={() => { setMode("single"); reset(); }} style={tabStyle(mode === "single")}>
           Tek URL
         </button>
-        <button
-          type="button"
-          onClick={() => { setMode("list"); reset(); }}
-          style={tabStyle(mode === "list")}
-        >
+        <button type="button" onClick={() => { setMode("list"); reset(); }} style={tabStyle(mode === "list")}>
           URL Listesi
+        </button>
+        <button type="button" onClick={() => { setMode("visibility"); reset(); }} style={tabStyle(mode === "visibility")}>
+          AI Görünürlük
         </button>
       </div>
 
       <form
-        onSubmit={mode === "single" ? onSubmitSingle : onSubmitList}
+        onSubmit={
+          mode === "single" ? onSubmitSingle : mode === "list" ? onSubmitList : onSubmitVisibility
+        }
         style={{
           display: "grid",
           gap: 12,
@@ -266,52 +304,76 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
           marginTop: 0,
         }}
       >
-        {mode === "single" ? (
+        {mode === "single" && (
           <label style={{ display: "grid", gap: 6 }}>
             <span>Denetlenecek URL</span>
             <input
-              type="text"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="dardanel.com.tr"
-              required
-              style={inputStyle}
-            />
-          </label>
-        ) : (
-          <label style={{ display: "grid", gap: 6 }}>
-            <span>URL listesi (her satıra bir URL — SEO/GEO hedefli sayfalar)</span>
-            <textarea
-              value={urlsText}
-              onChange={(e) => setUrlsText(e.target.value)}
-              placeholder={"dardanel.com.tr\ndardanel.com.tr/urunler\ndardanel.com.tr/blog"}
-              rows={6}
-              required
-              style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
+              type="text" value={url} onChange={(e) => setUrl(e.target.value)}
+              placeholder="dardanel.com.tr" required style={inputStyle}
             />
           </label>
         )}
+        {mode === "list" && (
+          <label style={{ display: "grid", gap: 6 }}>
+            <span>URL listesi (her satıra bir URL — SEO/GEO hedefli sayfalar)</span>
+            <textarea
+              value={urlsText} onChange={(e) => setUrlsText(e.target.value)}
+              placeholder={"dardanel.com.tr\ndardanel.com.tr/urunler\ndardanel.com.tr/blog"}
+              rows={6} required style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
+            />
+          </label>
+        )}
+        {mode === "visibility" && (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <label style={{ display: "grid", gap: 6 }}>
+                <span>Marka adı</span>
+                <input
+                  type="text" value={brand} onChange={(e) => setBrand(e.target.value)}
+                  placeholder="Tara Robotik" required style={inputStyle}
+                />
+              </label>
+              <label style={{ display: "grid", gap: 6 }}>
+                <span>Domain</span>
+                <input
+                  type="text" value={domain} onChange={(e) => setDomain(e.target.value)}
+                  placeholder="tararobotik.com" required style={inputStyle}
+                />
+              </label>
+            </div>
+            <label style={{ display: "grid", gap: 6 }}>
+              <span>Sektör / konu (opsiyonel — otomatik prompt üretimi için)</span>
+              <input
+                type="text" value={topic} onChange={(e) => setTopic(e.target.value)}
+                placeholder="ör. robotik paletleme" style={inputStyle}
+              />
+            </label>
+            <label style={{ display: "grid", gap: 6 }}>
+              <span>Ek prompt&apos;lar (opsiyonel — her satıra bir soru; otomatik üretilenlere eklenir)</span>
+              <textarea
+                value={manualPromptsText} onChange={(e) => setManualPromptsText(e.target.value)}
+                placeholder={"Endüstriyel makine besleme için en iyi robotik çözümler?"}
+                rows={4} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
+              />
+            </label>
+          </>
+        )}
 
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>Müşteri adı (opsiyonel — rapor kapağında görünür)</span>
-          <input
-            type="text"
-            value={client}
-            onChange={(e) => setClient(e.target.value)}
-            placeholder="Dardanel"
-            style={inputStyle}
-          />
-        </label>
+        {mode !== "visibility" && (
+          <label style={{ display: "grid", gap: 6 }}>
+            <span>Müşteri adı (opsiyonel — rapor kapağında görünür)</span>
+            <input
+              type="text" value={client} onChange={(e) => setClient(e.target.value)}
+              placeholder="Dardanel" style={inputStyle}
+            />
+          </label>
+        )}
 
         {mode === "single" && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <label style={{ display: "grid", gap: 6 }}>
               <span>Sayfa türü</span>
-              <select
-                value={pageType}
-                onChange={(e) => setPageType(e.target.value)}
-                style={inputStyle}
-              >
+              <select value={pageType} onChange={(e) => setPageType(e.target.value)} style={inputStyle}>
                 {PAGE_TYPES.map((pt) => (
                   <option key={pt.value} value={pt.value}>{pt.label}</option>
                 ))}
@@ -320,43 +382,46 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
             <label style={{ display: "grid", gap: 6 }}>
               <span>Hedef anahtar kelime (opsiyonel)</span>
               <input
-                type="text"
-                value={targetKeyword}
-                onChange={(e) => setTargetKeyword(e.target.value)}
-                placeholder="ör. ton balığı konservesi"
-                style={inputStyle}
+                type="text" value={targetKeyword} onChange={(e) => setTargetKeyword(e.target.value)}
+                placeholder="ör. ton balığı konservesi" style={inputStyle}
               />
             </label>
           </div>
         )}
 
-        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="checkbox"
-            checked={renderJs}
-            disabled={mode === "single" && compareRender}
-            onChange={(e) => setRenderJs(e.target.checked)}
-          />
-          <span>JavaScript ile render et (SPA siteleri için)</span>
-        </label>
+        {mode !== "visibility" && (
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="checkbox" checked={renderJs} disabled={mode === "single" && compareRender}
+              onChange={(e) => setRenderJs(e.target.checked)}
+            />
+            <span>JavaScript ile render et (SPA siteleri için)</span>
+          </label>
+        )}
 
         {mode === "single" && (
           <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input
-              type="checkbox"
-              checked={compareRender}
-              onChange={(e) => setCompareRender(e.target.checked)}
-            />
+            <input type="checkbox" checked={compareRender} onChange={(e) => setCompareRender(e.target.checked)} />
             <span>AI vs kullanıcı karşılaştır (ham HTML ↔ JS render farkı)</span>
           </label>
         )}
 
+        {mode === "visibility" && (
+          <div style={{ fontSize: 12.5, color: "#647892" }}>
+            Prompt&apos;lar OpenAI, Perplexity ve Gemini&apos;de çalıştırılır; markanın
+            cevaplarda anılıp anılmadığı ve kaynak gösterilip gösterilmediği ölçülür.
+            Bu skor GEO skorundan ayrıdır.
+          </div>
+        )}
+
         <button type="submit" disabled={loading} style={buttonStyle(loading)}>
           {loading
-            ? statusText ?? "Denetleniyor…"
+            ? statusText ?? "Çalışıyor…"
             : mode === "single"
               ? "Denetle"
-              : "Listeyi Denetle"}
+              : mode === "list"
+                ? "Listeyi Denetle"
+                : "Görünürlüğü Analiz Et"}
         </button>
       </form>
 
@@ -386,6 +451,14 @@ function AuditTool({ user, onLogout }: { user: CurrentUser; onLogout: () => void
       )}
 
       {batchResult && <BatchResultView result={batchResult} />}
+
+      {visResult?.report && (
+        <VisibilityResultView
+          report={visResult.report}
+          pdfUrl={artifactUrl(visResult.pdf_url)}
+          htmlUrl={artifactUrl(visResult.html_url)}
+        />
+      )}
     </main>
   );
 }
@@ -910,6 +983,209 @@ function TargetingView({ targeting: t }: { targeting: Targeting }) {
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function VisibilityResultView({
+  report: r,
+  pdfUrl,
+  htmlUrl,
+}: {
+  report: VisibilityReport;
+  pdfUrl: string | null;
+  htmlUrl: string | null;
+}) {
+  const gradeColor = ratioColor((r.score ?? 0) / 100);
+  const score = Math.round(r.score ?? 0);
+  const label =
+    score >= 70 ? "Güçlü" : score >= 45 ? "Orta" : score >= 20 ? "Düşük" : "Çok Düşük";
+  const maxMention = Math.max(...r.engine_stats.map((e) => e.mention_count), 1);
+  const maxComp = Math.max(...r.competitor_ranking.map((c) => c.count), 1);
+  const statusPill = (er: VisEngineResult) => {
+    if (er.status === "cited")
+      return { bg: "#12261a", fg: "#22c55e", txt: `✓ ${er.engine} · ${er.citation_count}/${er.samples} kaynak` };
+    if (er.status === "mentioned")
+      return { bg: "#1e2149", fg: "#818cf8", txt: `● ${er.engine} · ${er.mention_count}/${er.samples} anıldı` };
+    return { bg: "#3a1620", fg: "#f87171", txt: `✗ ${er.engine} · anılmadı` };
+  };
+
+  return (
+    <div style={{ marginTop: 24, display: "grid", gap: 16 }}>
+      <div style={{ ...cardStyle, display: "flex", alignItems: "center", gap: 20 }}>
+        <div
+          style={{
+            width: 96, height: 96, borderRadius: "50%", display: "grid",
+            placeItems: "center", border: `6px solid ${gradeColor}`, flexShrink: 0,
+          }}
+        >
+          <span style={{ fontSize: 30, fontWeight: 700 }}>{score}</span>
+        </div>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>
+            AI Görünürlük: {score}/100 <span style={{ color: gradeColor }}>({label})</span>
+          </div>
+          <div style={{ color: "#9fb0c7", marginTop: 4 }}>
+            {r.brand} · {r.domain}
+          </div>
+          <div style={{ color: "#647892", fontSize: 13, marginTop: 2 }}>
+            {r.prompt_count} prompt · {r.engines_used.length} motor · {r.api_calls} API çağrısı
+          </div>
+        </div>
+      </div>
+
+      {/* stat strip */}
+      <div style={{ display: "flex", gap: 12 }}>
+        <div style={cardStyle}>
+          <b style={{ fontSize: 24 }}>{r.mention_total}</b>
+          <span style={{ color: "#9fb0c7", fontSize: 12, display: "block" }}>
+            anılma ({r.slot_total} sonuçtan)
+          </span>
+        </div>
+        <div style={cardStyle}>
+          <b style={{ fontSize: 24 }}>{r.citation_total}</b>
+          <span style={{ color: "#9fb0c7", fontSize: 12, display: "block" }}>kaynak gösterme</span>
+        </div>
+        <div style={cardStyle}>
+          <b style={{ fontSize: 24 }}>{r.competitor_ranking.length}</b>
+          <span style={{ color: "#9fb0c7", fontSize: 12, display: "block" }}>farklı rakip</span>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        {pdfUrl && (
+          <a href={pdfUrl} target="_blank" rel="noreferrer" style={linkButton("#2563eb")}>
+            Rapor (PDF)
+          </a>
+        )}
+        {htmlUrl && (
+          <a href={htmlUrl} target="_blank" rel="noreferrer" style={linkButton("#334155")}>
+            Rapor (HTML)
+          </a>
+        )}
+      </div>
+
+      {/* engine distribution */}
+      <div style={cardStyle}>
+        <h2 style={{ marginTop: 0, fontSize: 18 }}>Motor Dağılımı</h2>
+        <div style={{ display: "grid", gap: 10 }}>
+          {r.engine_stats.map((e) => (
+            <div key={e.engine}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginBottom: 4 }}>
+                <span>{e.engine}</span>
+                <span style={{ color: "#9fb0c7" }}>
+                  {e.mention_count} anılma · {e.citation_count} kaynak
+                </span>
+              </div>
+              <div style={{ height: 8, borderRadius: 4, background: "#1f2c47", overflow: "hidden" }}>
+                <div style={{ width: `${Math.round((e.mention_count / maxMention) * 100)}%`, height: "100%", background: "#7c3aed" }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* competitor + source rankings */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={cardStyle}>
+          <h2 style={{ marginTop: 0, fontSize: 18 }}>Rakip Markalar</h2>
+          {r.competitor_ranking.length === 0 && (
+            <span style={{ color: "#647892", fontSize: 13 }}>Rakip tespit edilmedi.</span>
+          )}
+          {r.competitor_ranking.map((c) => (
+            <div key={c.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", fontSize: 13.5 }}>
+              <span style={{ flex: 1, fontWeight: 600 }}>{c.name}</span>
+              <span style={{ width: 90, height: 7, background: "#1f2c47", borderRadius: 999, overflow: "hidden" }}>
+                <span style={{ display: "block", width: `${Math.round((c.count / maxComp) * 100)}%`, height: "100%", background: "#a78bfa" }} />
+              </span>
+              <span style={{ color: "#9fb0c7", fontSize: 12 }}>{c.count} yanıt</span>
+            </div>
+          ))}
+        </div>
+        <div style={cardStyle}>
+          <h2 style={{ marginTop: 0, fontSize: 18 }}>Öne Çıkan Kaynaklar</h2>
+          {r.source_ranking.length === 0 && (
+            <span style={{ color: "#647892", fontSize: 13 }}>Kaynak gösterilmedi.</span>
+          )}
+          {r.source_ranking.map((s) => (
+            <div key={s.domain} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", fontSize: 13.5 }}>
+              <span style={{ flex: 1, fontWeight: 600 }}>
+                {s.domain}
+                {s.is_ours && (
+                  <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 800, color: "#a78bfa", background: "#2a1f4a", borderRadius: 5, padding: "1px 6px" }}>
+                    SİZ
+                  </span>
+                )}
+              </span>
+              <span style={{ color: "#9fb0c7", fontSize: 12 }}>{s.count} kez</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* detailed prompt cards */}
+      <div style={cardStyle}>
+        <h2 style={{ marginTop: 0, fontSize: 18 }}>Prompt Bazlı Sonuçlar</h2>
+        <div style={{ display: "grid", gap: 14 }}>
+          {r.prompts.map((pr, i) => {
+            const rank: Record<string, number> = { cited: 0, mentioned: 1, absent: 2 };
+            const best = [...pr.engines].sort((a, b) => (rank[a.status] ?? 3) - (rank[b.status] ?? 3))[0];
+            const comps = Array.from(new Set(pr.engines.flatMap((e) => e.competitors)));
+            const srcs = Array.from(new Set(pr.engines.flatMap((e) => e.sources))).slice(0, 6);
+            return (
+              <div key={i} style={{ border: "1px solid #1f2c47", borderRadius: 12, padding: 16 }}>
+                <div style={{ fontWeight: 700, fontSize: 14.5, marginBottom: 3 }}>{pr.prompt}</div>
+                <div style={{ fontSize: 12, color: "#647892", marginBottom: 10 }}>
+                  Kaynak: {pr.source === "manual" ? "manuel girildi" : "otomatik üretildi"}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+                  {pr.engines.map((er, j) => {
+                    const p = statusPill(er);
+                    return (
+                      <span key={j} style={{ fontSize: 12.5, fontWeight: 600, color: p.fg, background: p.bg, border: "1px solid #1f2c47", borderRadius: 999, padding: "4px 11px" }}>
+                        {p.txt}
+                      </span>
+                    );
+                  })}
+                </div>
+                {best?.response_excerpt && (
+                  <div style={{ background: "#0b1220", borderLeft: "3px solid #7c3aed", borderRadius: "0 8px 8px 0", padding: "10px 12px", fontSize: 13, color: "#c5cfdd", marginBottom: 10 }}>
+                    <b style={{ color: "#e6edf6" }}>{best.engine} yanıtı:</b> {best.response_excerpt}…
+                  </div>
+                )}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", color: "#647892", marginBottom: 6 }}>
+                      Yanıtta geçen rakipler
+                    </div>
+                    {comps.length === 0 ? (
+                      <span style={{ color: "#647892", fontSize: 12.5 }}>—</span>
+                    ) : (
+                      comps.map((c) => (
+                        <span key={c} style={{ display: "inline-block", fontSize: 12.5, fontWeight: 600, padding: "3px 9px", borderRadius: 999, background: "#1f2c47", color: "#c5cfdd", margin: "0 6px 6px 0" }}>
+                          {c}
+                        </span>
+                      ))
+                    )}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", color: "#647892", marginBottom: 6 }}>
+                      Gösterilen kaynaklar
+                    </div>
+                    {srcs.length === 0 ? (
+                      <span style={{ color: "#647892", fontSize: 12.5 }}>—</span>
+                    ) : (
+                      srcs.map((s) => (
+                        <div key={s} style={{ fontSize: 12.5, color: "#93c5fd", padding: "2px 0", wordBreak: "break-all" }}>{s}</div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

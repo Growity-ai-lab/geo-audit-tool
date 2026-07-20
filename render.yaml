@@ -71,6 +71,16 @@ services:
         sync: false                  # optional: enables real Core Web Vitals
       - key: ANTHROPIC_API_KEY
         sync: false                  # optional: enables AI report commentary
+      # AI Visibility (#5). Each engine runs only if its key is set; the score
+      # is separate and never affects the 100-point GEO score.
+      - key: OPENAI_API_KEY
+        sync: false                  # optional: enables ChatGPT visibility engine
+      - key: PERPLEXITY_API_KEY
+        sync: false                  # optional: enables Perplexity visibility engine
+      - key: GEMINI_API_KEY
+        sync: false                  # optional: enables Gemini visibility engine
+      - key: ENABLE_CLAUDE_VISIBILITY
+        sync: false                  # optional: "true" adds Claude as a 4th engine
 
   # --- Celery worker (crawl + JS render; processes audits) ----------------
   - type: worker
@@ -102,6 +112,15 @@ services:
       - key: PAGESPEED_API_KEY
         sync: false
       - key: ANTHROPIC_API_KEY
+        sync: false
+      # AI Visibility (#5) — the visibility audit runs in the worker.
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: PERPLEXITY_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ENABLE_CLAUDE_VISIBILITY
         sync: false
 
   # --- Frontend (Next.js) -------------------------------------------------

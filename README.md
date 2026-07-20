@@ -264,6 +264,48 @@ export ANTHROPIC_API_KEY=...              # console.anthropic.com
 export AI_COMMENTARY_MODEL=claude-haiku-4-5   # varsayılan
 ```
 
+### AI Görünürlük (canlı LLM testi)
+
+GEO skoru bir sitenin AI motorlarına **hazırlığını** ölçer (on-site sinyaller).
+**AI Görünürlük** ise bunun karşılığını canlı ölçer: gerçek promptları gerçek
+LLM motorlarında çalıştırıp markanın yanıtlarda **anılıp anılmadığını** ve
+sitenin **kaynak olarak gösterilip gösterilmediğini** sayar. Arayüzdeki
+üçüncü sekme (**AI Görünürlük**) marka + domain + (opsiyonel) konu alır;
+promptlar **otomatik üretilir** ve istenirse **manuel** de girilebilir.
+
+- **Ayrı skor.** AI Görünürlük 0–100 kendi skoru ve harfiyle raporlanır;
+  **GEO skorunu etkilemez**. Sebep: farklı bir şeyi ölçer (off-site sonuç vs
+  on-site hazırlık) ve LLM yanıtları non-deterministik olduğundan karıştırmak
+  GEO skorunu koşular arası kıyaslanamaz yapardı. Skor =
+  `100 × (0.6 × anılma oranı + 0.4 × kaynak oranı)`, tüm prompt×motor×örnek
+  slotları üzerinden.
+- **Motorlar config-gated.** Her motor yalnız kendi anahtarı ayarlıysa çalışır;
+  hiçbiri yoksa audit hata döner. Non-determinizm için her prompt birden çok
+  kez örneklenir ve oran raporlanır (ör. "2/2 anıldı"). Rakip markalar ve
+  gösterilen kaynaklar açıkça listelenir; her rapora tarih + kullanılan model
+  yazılır.
+- **Bütçe koruması.** Ücretli çağrılar `VISIBILITY_MAX_API_CALLS` ile
+  sınırlanır (kill-switch); prompt ve örnek sayısı da yapılandırılır. Rapor
+  toplam API çağrısını gösterir.
+
+```bash
+export OPENAI_API_KEY=...              # ChatGPT motoru (Responses API + web_search)
+export PERPLEXITY_API_KEY=...          # Perplexity motoru (kaynak/atıf gösterir)
+export GEMINI_API_KEY=...              # Gemini motoru (Google Search grounding)
+export ENABLE_CLAUDE_VISIBILITY=true   # opsiyonel 4. motor (ANTHROPIC_API_KEY kullanır)
+# İnce ayar (varsayılanlar):
+export OPENAI_MODEL=gpt-4o
+export PERPLEXITY_MODEL=sonar
+export GEMINI_MODEL=gemini-2.5-flash
+export VISIBILITY_SAMPLE_COUNT=2       # her prompt×motor için örnek sayısı
+export VISIBILITY_MAX_PROMPTS=10       # otomatik + manuel prompt üst sınırı
+export VISIBILITY_MAX_API_CALLS=120    # bütçe kill-switch (ücretli çağrı tavanı)
+```
+
+> Motor adaptörleri (OpenAI / Perplexity / Gemini / Claude) resmi SDK'ların
+> belgelenmiş çağrı şekillerine göre yazıldı; uçtan uca ancak canlı anahtarlarla
+> doğrulanabilir. Ayrıştırma (parsing) mantığı mock SDK'larla test kapsamındadır.
+
 ### Belirsiz bulgular için manuel onay
 
 Sitemap, robots.txt ve llms.txt kontrolleri hedef sitenin WAF/rate-limit'i
@@ -326,6 +368,8 @@ geo-audit-tool/
 │   ├── content_analyzer.py  # Headings, answer-first, llms.txt, meta signals
 │   ├── scorer.py            # Weighted scoring + grading engine
 │   ├── reporter.py          # Terminal / HTML / JSON / CSV output
+│   ├── ai_visibility.py     # AI Görünürlük engine (prompts, scoring, report)
+│   ├── ai_engines.py        # LLM adapters (OpenAI/Perplexity/Gemini/Claude)
 │   └── batch.py             # Multi-URL auditing
 ├── api/                     # FastAPI layer (wraps the engine; A1–A3)
 │   ├── main.py              # App, CORS, /healthz, admin bootstrap (lifespan)

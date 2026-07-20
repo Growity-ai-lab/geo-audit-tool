@@ -218,6 +218,63 @@ export interface BatchInput {
   render_js?: boolean;
 }
 
+// --- AI Visibility -------------------------------------------------------- //
+
+export interface VisEngineResult {
+  engine: string;
+  samples: number;
+  mention_count: number;
+  citation_count: number;
+  status: "cited" | "mentioned" | "absent";
+  response_excerpt: string;
+  competitors: string[];
+  sources: string[];
+}
+
+export interface VisPromptResult {
+  prompt: string;
+  source: "auto" | "manual";
+  engines: VisEngineResult[];
+}
+
+export interface VisibilityReport {
+  brand: string;
+  domain: string;
+  score: number;
+  grade: string;
+  prompt_count: number;
+  sample_count: number;
+  engines_used: string[];
+  mention_total: number;
+  citation_total: number;
+  slot_total: number;
+  competitor_ranking: { name: string; count: number }[];
+  source_ranking: { domain: string; count: number; is_ours: boolean }[];
+  engine_stats: { engine: string; mention_count: number; citation_count: number; answered: number }[];
+  prompts: VisPromptResult[];
+  api_calls: number;
+  models_used: Record<string, string>;
+  generated_at: string;
+}
+
+export interface VisibilityResult {
+  audit_id: string;
+  status: AuditStatus;
+  report: VisibilityReport | null;
+  html_url: string | null;
+  pdf_url: string | null;
+  error: string | null;
+}
+
+export interface VisibilityInput {
+  brand: string;
+  domain: string;
+  topic?: string;
+  aliases?: string[];
+  manual_prompts?: string[];
+  client?: string;
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const POLL_INTERVAL_MS = 1500;
 const POLL_MAX_ATTEMPTS = 120; // ~3 minutes
@@ -354,6 +411,61 @@ export async function runBatch(
     onStatus?.(result.status);
     await sleep(POLL_INTERVAL_MS);
     result = await getBatch(result.audit_id);
+    attempts += 1;
+  }
+  return result;
+}
+
+/** Fetch an AI Visibility run's current state. */
+export async function getVisibility(auditId: string): Promise<VisibilityResult> {
+  const res = await fetch(`${API_BASE_URL}/audits/ai-visibility/${auditId}`, {
+    headers: authHeaders(),
+  });
+  if (res.status === 401) {
+    clearToken();
+    throw new AuthError("Oturum süresi doldu. Lütfen tekrar giriş yapın.");
+  }
+  if (!res.ok) throw new Error(`Görünürlük analizi alınamadı (HTTP ${res.status}).`);
+  return (await res.json()) as VisibilityResult;
+}
+
+/** Enqueue an AI Visibility run and poll until it reaches a terminal status. */
+export async function runVisibility(
+  input: VisibilityInput,
+  onStatus?: (status: AuditStatus) => void,
+): Promise<VisibilityResult> {
+  const res = await fetch(`${API_BASE_URL}/audits/ai-visibility`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(input),
+  });
+  if (res.status === 401) {
+    clearToken();
+    throw new AuthError("Oturum süresi doldu. Lütfen tekrar giriş yapın.");
+  }
+  if (!res.ok) {
+    let detail = `İstek başarısız (HTTP ${res.status}).`;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = String(body.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+
+  let result = (await res.json()) as VisibilityResult;
+  let attempts = 0;
+  // Visibility runs many LLM calls — allow generous polling time.
+  const maxAttempts = POLL_MAX_ATTEMPTS * 5;
+  while (
+    result.status !== "done" &&
+    result.status !== "error" &&
+    attempts < maxAttempts
+  ) {
+    onStatus?.(result.status);
+    await sleep(POLL_INTERVAL_MS);
+    result = await getVisibility(result.audit_id);
     attempts += 1;
   }
   return result;
