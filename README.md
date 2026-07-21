@@ -283,7 +283,9 @@ promptlar **otomatik üretilir** ve istenirse **manuel** de girilebilir.
   hiçbiri yoksa audit hata döner. Non-determinizm için her prompt birden çok
   kez örneklenir ve oran raporlanır (ör. "2/2 anıldı"). Rakip markalar ve
   gösterilen kaynaklar açıkça listelenir; her rapora tarih + kullanılan model
-  yazılır.
+  yazılır. **Rakip çıkarımı** için ayrı bir LLM çağrısı kullanılır (OpenAI →
+  Anthropic → Gemini sırasıyla, mevcut anahtara göre); yalnız Gemini anahtarı
+  olsa bile rakipler çıkarılır, ek anahtar gerekmez.
 - **Bütçe koruması.** Ücretli çağrılar `VISIBILITY_MAX_API_CALLS` ile
   sınırlanır (kill-switch); prompt ve örnek sayısı da yapılandırılır. Rapor
   toplam API çağrısını gösterir.

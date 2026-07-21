@@ -57,6 +57,18 @@ def test_root_domain():
     assert root_domain("") == ""
 
 
+def test_root_domain_multilabel_cctld():
+    # Turkish (and other) ccTLDs must keep three labels, not collapse to com.tr.
+    assert root_domain("https://www.dardanel.com.tr/urunler") == "dardanel.com.tr"
+    assert root_domain("dardanel.com.tr") == "dardanel.com.tr"
+    assert root_domain("news.bbc.co.uk/x") == "bbc.co.uk"
+
+
+def test_is_cited_matches_cctld_domain():
+    assert is_cited(["dardanel.com.tr"], "https://www.dardanel.com.tr") is True
+    assert is_cited(["superfresh.com.tr"], "dardanel.com.tr") is False
+
+
 def test_is_cited_matches_root_domain():
     assert is_cited(["https://www.tararobotik.com/a", "abb.com"], "tararobotik.com") is True
     assert is_cited(["abb.com"], "tararobotik.com") is False

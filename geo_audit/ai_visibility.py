@@ -206,8 +206,15 @@ def is_mentioned(text: str, brand: str, aliases: Tuple[str, ...] = ()) -> bool:
     return False
 
 
+# Second-level labels used under a 2-letter country TLD (e.g. dardanel.com.tr,
+# bbc.co.uk). When we see one, the registrable root is the last THREE labels,
+# not two — otherwise dardanel.com.tr collapses to "com.tr" and every .com.tr
+# site looks like the same source.
+_CCTLD_SLDS = {"com", "co", "org", "net", "gov", "edu", "ac", "gen", "biz", "web", "k12"}
+
+
 def root_domain(url_or_domain: str) -> str:
-    """Reduce a URL or host to its registrable-ish root (last two labels)."""
+    """Reduce a URL or host to its registrable-ish root domain."""
     s = (url_or_domain or "").strip().lower()
     if not s:
         return ""
@@ -220,7 +227,12 @@ def root_domain(url_or_domain: str) -> str:
         host = host[4:]
     host = host.split(":")[0]  # drop port
     parts = [p for p in host.split(".") if p]
-    return ".".join(parts[-2:]) if len(parts) >= 2 else host
+    if len(parts) < 2:
+        return host
+    # e.g. dardanel.com.tr / bbc.co.uk → keep three labels.
+    if len(parts) >= 3 and parts[-2] in _CCTLD_SLDS and len(parts[-1]) == 2:
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:])
 
 
 def is_cited(sources: List[str], domain: str) -> bool:

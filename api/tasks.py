@@ -220,6 +220,8 @@ def run_visibility_task(
             extractor = build_extractor(
                 openai_key=settings.openai_api_key,
                 anthropic_key=settings.anthropic_api_key,
+                gemini_key=settings.gemini_api_key,
+                gemini_model=settings.gemini_model,
             )
             prompts = build_prompts(
                 brand, topic=topic, manual_prompts=manual_prompts,

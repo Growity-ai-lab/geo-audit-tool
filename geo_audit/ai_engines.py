@@ -151,9 +151,15 @@ class GeminiEngine:
             gm = getattr(cand, "grounding_metadata", None)
             for chunk in getattr(gm, "grounding_chunks", []) or []:
                 web = getattr(chunk, "web", None)
+                # Gemini's grounding `uri` is an opaque Google redirect
+                # (vertexaisearch.cloud.google.com/...); the real publisher
+                # domain is in `title` (e.g. "dardanel.com.tr"). Prefer it so
+                # citation detection + source ranking see the actual site.
+                title = getattr(web, "title", None)
                 uri = getattr(web, "uri", None)
-                if uri:
-                    sources.append(uri)
+                src = title or uri
+                if src:
+                    sources.append(src)
         return EngineQueryResult(text=text, sources=_dedupe(sources))
 
 
@@ -317,6 +323,44 @@ class AnthropicCompetitorExtractor:
         return _parse_names(text, brand)
 
 
+class GeminiCompetitorExtractor:
+    """Extract competitor brand names using a cheap (ungrounded) Gemini call.
+
+    Lets competitor extraction work when Gemini is the only configured provider
+    (no separate OpenAI/Anthropic key needed)."""
+
+    def __init__(self, api_key: str, model: str = "gemini-flash-latest"):
+        self.api_key = api_key
+        self.model = model
+        self._resolved_model: Optional[str] = None
+
+    def extract(self, response_text: str, brand: str) -> List[str]:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(
+            api_key=self.api_key,
+            http_options=types.HttpOptions(timeout=_TIMEOUT * 1000),
+        )
+        prompt = (
+            _EXTRACT_SYSTEM.format(brand=brand)
+            + "\n\nYANIT:\n"
+            + (response_text or "")[:4000]
+        )
+        model = self._resolved_model or self.model
+        try:
+            resp = client.models.generate_content(model=model, contents=prompt)
+        except Exception as exc:  # noqa: BLE001
+            if self._resolved_model is not None or not _is_model_not_found(exc):
+                raise
+            alt = _discover_gemini_model(client)
+            if not alt or alt == model:
+                raise
+            self._resolved_model = alt
+            resp = client.models.generate_content(model=alt, contents=prompt)
+        return _parse_names(getattr(resp, "text", "") or "", brand)
+
+
 def _parse_names(raw: Optional[str], brand: str) -> List[str]:
     """Parse a JSON array (or {"...": [...]}) of names from an LLM reply."""
     if not raw:
@@ -329,7 +373,16 @@ def _parse_names(raw: Optional[str], brand: str) -> List[str]:
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
-        return []
+        # Some models wrap the array in prose ("İşte markalar: [...]"). Fall
+        # back to the first JSON array substring.
+        start, end = raw.find("["), raw.rfind("]")
+        if start != -1 and end > start:
+            try:
+                data = json.loads(raw[start:end + 1])
+            except json.JSONDecodeError:
+                return []
+        else:
+            return []
     names: List[str] = []
     if isinstance(data, list):
         names = data
@@ -378,10 +431,19 @@ def build_engines(
     return engines
 
 
-def build_extractor(*, openai_key: str = "", anthropic_key: str = ""):
-    """Pick a competitor extractor from available keys (OpenAI preferred), or None."""
+def build_extractor(
+    *, openai_key: str = "", anthropic_key: str = "", gemini_key: str = "",
+    gemini_model: str = "gemini-flash-latest",
+):
+    """Pick a competitor extractor from available keys, or None.
+
+    Preference: OpenAI (cheap, JSON mode) → Anthropic → Gemini. The Gemini
+    fallback means competitor extraction works even when Gemini is the only
+    configured provider (no extra key needed)."""
     if openai_key:
         return OpenAICompetitorExtractor(openai_key)
     if anthropic_key:
         return AnthropicCompetitorExtractor(anthropic_key)
+    if gemini_key:
+        return GeminiCompetitorExtractor(gemini_key, gemini_model)
     return None

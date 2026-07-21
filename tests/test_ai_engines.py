@@ -89,12 +89,16 @@ def test_perplexity_engine_reads_search_results_shape(monkeypatch):
 
 
 def test_gemini_engine_parses_grounding(monkeypatch):
+    # Real Gemini grounding: `uri` is an opaque Google redirect and the true
+    # publisher domain is in `title`. We must surface the title.
     resp = _ns(
         text="Gemini yanıtı.",
         candidates=[
             _ns(grounding_metadata=_ns(grounding_chunks=[
-                _ns(web=_ns(uri="https://wikipedia.org/x")),
-                _ns(web=_ns(uri="https://tararobotik.com")),
+                _ns(web=_ns(uri="https://vertexaisearch.cloud.google.com/redirect/1",
+                            title="wikipedia.org")),
+                _ns(web=_ns(uri="https://vertexaisearch.cloud.google.com/redirect/2",
+                            title="dardanel.com.tr")),
             ]))
         ],
     )
@@ -114,7 +118,8 @@ def test_gemini_engine_parses_grounding(monkeypatch):
     monkeypatch.setitem(sys.modules, "google.genai.types", fake_types)
     out = GeminiEngine("key").query("prompt")
     assert out.text == "Gemini yanıtı."
-    assert out.sources == ["https://wikipedia.org/x", "https://tararobotik.com"]
+    # Real domains from `title`, not the vertexaisearch redirect URLs.
+    assert out.sources == ["wikipedia.org", "dardanel.com.tr"]
 
 
 def test_gemini_engine_recovers_from_model_404(monkeypatch):
@@ -201,6 +206,12 @@ def test_parse_names_invalid_returns_empty():
     assert _parse_names(None, "Tara") == []
 
 
+def test_parse_names_array_embedded_in_prose():
+    # Gemini sometimes wraps the array in prose; we recover the array.
+    assert _parse_names('İşte markalar: ["ABB", "KUKA"] umarım yardımcı olur.',
+                        "Tara") == ["ABB", "KUKA"]
+
+
 # --- config-gated construction -------------------------------------------- #
 
 
@@ -216,9 +227,27 @@ def test_build_engines_claude_requires_explicit_enable():
     assert [e.name for e in engines] == ["Claude"]
 
 
-def test_build_extractor_prefers_openai_then_anthropic_then_none():
+def test_build_extractor_prefers_openai_then_anthropic_then_gemini_then_none():
     assert isinstance(build_extractor(openai_key="a", anthropic_key="b"),
                       eng.OpenAICompetitorExtractor)
     assert isinstance(build_extractor(anthropic_key="b"),
                       eng.AnthropicCompetitorExtractor)
+    # Gemini-only setup still gets competitor extraction (no extra key needed).
+    assert isinstance(build_extractor(gemini_key="g"),
+                      eng.GeminiCompetitorExtractor)
     assert build_extractor() is None
+
+
+def test_gemini_competitor_extractor_parses_names(monkeypatch):
+    resp = _ns(text='["SuperFresh", "Kerevitaş"]')
+
+    class _Client:
+        def __init__(self, api_key=None, http_options=None):
+            self.models = _ns(generate_content=lambda **kw: resp)
+
+    fake_types = _ns(HttpOptions=lambda **kw: None)
+    monkeypatch.setitem(sys.modules, "google", _ns(genai=_ns(Client=_Client)))
+    monkeypatch.setitem(sys.modules, "google.genai", _ns(Client=_Client, types=fake_types))
+    monkeypatch.setitem(sys.modules, "google.genai.types", fake_types)
+    names = eng.GeminiCompetitorExtractor("key").extract("Dardanel ve rakipleri...", "Dardanel")
+    assert names == ["SuperFresh", "Kerevitaş"]
