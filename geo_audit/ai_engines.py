@@ -100,26 +100,46 @@ class PerplexityEngine:
 
 
 class GeminiEngine:
-    """Gemini (Google) with Google Search grounding."""
+    """Gemini (Google) with Google Search grounding.
+
+    Google retires dated model IDs (``gemini-2.0-flash`` etc.) for new keys
+    fairly aggressively, so a hard-coded model can start returning 404. If the
+    configured model 404s, we discover a live ``generateContent``-capable Flash
+    model once via ``models.list()`` and retry — self-healing against future
+    renames. The resolved model is cached on the instance."""
 
     name = "Gemini"
 
     def __init__(self, api_key: str, model: str = "gemini-flash-latest"):
         self.api_key = api_key
         self.model = model
+        self._resolved_model: Optional[str] = None
 
     def query(self, prompt: str) -> EngineQueryResult:
         from google import genai
         from google.genai import types
 
         client = genai.Client(api_key=self.api_key)
-        resp = client.models.generate_content(
-            model=self.model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                tools=[types.Tool(google_search=types.GoogleSearch())]
-            ),
+        config = types.GenerateContentConfig(
+            tools=[types.Tool(google_search=types.GoogleSearch())]
         )
+        model = self._resolved_model or self.model
+        try:
+            resp = client.models.generate_content(
+                model=model, contents=prompt, config=config
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Only try to recover once, and only from a "model not found".
+            if self._resolved_model is not None or not _is_model_not_found(exc):
+                raise
+            alt = _discover_gemini_model(client)
+            if not alt or alt == model:
+                raise
+            logger.warning("Gemini model %s unavailable; falling back to %s", model, alt)
+            self._resolved_model = alt
+            resp = client.models.generate_content(
+                model=alt, contents=prompt, config=config
+            )
         text = getattr(resp, "text", "") or ""
         sources: List[str] = []
         for cand in getattr(resp, "candidates", []) or []:
@@ -130,6 +150,60 @@ class GeminiEngine:
                 if uri:
                     sources.append(uri)
         return EngineQueryResult(text=text, sources=_dedupe(sources))
+
+
+def _is_model_not_found(exc: Exception) -> bool:
+    low = str(exc).lower()
+    return "not_found" in low or "404" in low
+
+
+# Model IDs that exist but aren't general text chat models (image/audio/tts/
+# embedding/etc.) — never auto-pick these for a grounded text answer.
+_GEMINI_SKIP = (
+    "tts", "image", "embedding", "vision", "audio", "aqa", "imagen", "veo",
+    "lyria", "robotics", "computer-use", "gemma", "nano", "deep-research",
+    "antigravity",
+)
+
+
+def _model_supports_generate(m) -> bool:
+    for attr in ("supported_actions", "supported_generation_methods"):
+        vals = getattr(m, attr, None)
+        if vals:
+            return "generateContent" in vals
+    return True  # unknown → assume yes (better to try than to skip)
+
+
+def _discover_gemini_model(client) -> Optional[str]:
+    """Pick a live generateContent-capable Flash model from the account.
+
+    Preference: a ``flash``+``latest`` alias (rename-proof) → any Flash →
+    any ``latest`` alias → any candidate. Returns the id without the
+    ``models/`` prefix, or None if discovery fails."""
+    try:
+        models = list(client.models.list())
+    except Exception:  # noqa: BLE001
+        return None
+    names: List[str] = []
+    for m in models:
+        short = (getattr(m, "name", "") or "").replace("models/", "")
+        low = short.lower()
+        if not short or any(s in low for s in _GEMINI_SKIP):
+            continue
+        if not _model_supports_generate(m):
+            continue
+        names.append(short)
+    preferences = (
+        lambda n: "flash" in n and "latest" in n and "lite" not in n,
+        lambda n: "flash" in n and "lite" not in n,
+        lambda n: "latest" in n,
+        lambda n: True,
+    )
+    for pred in preferences:
+        for n in names:
+            if pred(n.lower()):
+                return n
+    return None
 
 
 class ClaudeEngine:

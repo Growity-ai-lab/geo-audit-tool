@@ -316,9 +316,12 @@ motor skoru haksızca 0'a çekmez).
 dakikada yalnızca ~5 istek verir; birden çok prompt × örnek bunu hızla aşıp
 `429 RESOURCE_EXHAUSTED` döndürür. Gerçek kullanımda Google Cloud projesinde
 **faturalandırmayı açmak** (yüksek limit) gerekir. Ayrıca belirli dated model
-ID'leri (ör. `gemini-2.5-flash`) yeni anahtarlara kapatılabildiği için varsayılan
-model, güncel Flash'ı takip eden `gemini-flash-latest` alias'ıdır; gerekirse
-`GEMINI_MODEL` ile değiştirin (ör. `gemini-2.0-flash`).
+ID'leri (ör. `gemini-2.5-flash`, `gemini-2.0-flash`) yeni anahtarlara
+kapatılabildiği için varsayılan model, güncel Flash'ı takip eden
+`gemini-flash-latest` alias'ıdır; gerekirse `GEMINI_MODEL` ile değiştirin.
+Ayrıca adaptör **kendi kendini onarır**: yapılandırılan model 404 verirse, hesabın
+`generateContent` destekleyen uygun bir Flash modelini `models.list()` ile bir kez
+bulup otomatik yeniden dener (Google bir ID'yi daha emekliye ayırsa bile çalışır).
 
 ### Belirsiz bulgular için manuel onay
 
