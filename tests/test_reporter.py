@@ -106,3 +106,25 @@ def test_visibility_report_renders_sections():
     assert "Prompt Bazlı Sonuçlar" in out
     assert "SİZ" in out  # our domain flagged in source ranking
     assert "2/2" in out  # sample-ratio pill
+
+
+def test_visibility_report_surfaces_engine_errors():
+    from geo_audit.ai_visibility import analyze_visibility, build_prompts
+    from geo_audit.reporter import render_visibility_html
+
+    class _Broken:
+        name = "Gemini"
+        model = "gemini-flash-latest"
+
+        def query(self, prompt):
+            raise RuntimeError("404 NOT_FOUND model not available")
+
+    ps = build_prompts("Tara Robotik", max_prompts=1)
+    rep = analyze_visibility(
+        brand="Tara Robotik", domain="tararobotik.com", prompts=ps,
+        engines=[_Broken()], sample_count=1, max_api_calls=50, generated_at="14.07.2026",
+    )
+    out = render_visibility_html(rep, brand="Growity")
+    # The failure is shown loudly, not as a silent 0.
+    assert "Bazı motorlar yanıt veremedi" in out
+    assert "Model bulunamadı (404)" in out

@@ -225,10 +225,11 @@ export interface VisEngineResult {
   samples: number;
   mention_count: number;
   citation_count: number;
-  status: "cited" | "mentioned" | "absent";
+  status: "cited" | "mentioned" | "absent" | "error";
   response_excerpt: string;
   competitors: string[];
   sources: string[];
+  error?: string;
 }
 
 export interface VisPromptResult {
@@ -250,7 +251,7 @@ export interface VisibilityReport {
   slot_total: number;
   competitor_ranking: { name: string; count: number }[];
   source_ranking: { domain: string; count: number; is_ours: boolean }[];
-  engine_stats: { engine: string; mention_count: number; citation_count: number; answered: number }[];
+  engine_stats: { engine: string; mention_count: number; citation_count: number; answered: number; errored?: number; error?: string }[];
   prompts: VisPromptResult[];
   api_calls: number;
   models_used: Record<string, string>;

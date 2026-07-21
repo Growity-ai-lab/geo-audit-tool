@@ -116,6 +116,50 @@ def test_gemini_engine_parses_grounding(monkeypatch):
     assert out.sources == ["https://wikipedia.org/x", "https://tararobotik.com"]
 
 
+def test_gemini_engine_recovers_from_model_404(monkeypatch):
+    """A 404 on the configured model → discover a live Flash model and retry."""
+    resp = _ns(text="OK", candidates=[])
+    calls = {"generate": []}
+
+    listed = [
+        _ns(name="models/gemini-2.0-flash", supported_actions=["generateContent"]),
+        _ns(name="models/imagen-4.0", supported_actions=["predict"]),
+        _ns(name="models/gemini-flash-latest", supported_actions=["generateContent"]),
+        _ns(name="models/gemini-embedding-2", supported_actions=["embedContent"]),
+    ]
+
+    class _Client:
+        def __init__(self, api_key=None):
+            self.models = _ns(
+                generate_content=self._gen,
+                list=lambda: iter(listed),
+            )
+
+        def _gen(self, **kw):
+            calls["generate"].append(kw["model"])
+            if kw["model"] == "gemini-2.0-flash":
+                raise RuntimeError("404 NOT_FOUND: model no longer available")
+            return resp
+
+    fake_types = _ns(
+        GenerateContentConfig=lambda **kw: None,
+        Tool=lambda **kw: None,
+        GoogleSearch=lambda **kw: None,
+    )
+    monkeypatch.setitem(sys.modules, "google", _ns(genai=_ns(Client=_Client)))
+    monkeypatch.setitem(sys.modules, "google.genai", _ns(Client=_Client, types=fake_types))
+    monkeypatch.setitem(sys.modules, "google.genai.types", fake_types)
+
+    eng = GeminiEngine("key", model="gemini-2.0-flash")
+    out = eng.query("prompt")
+    assert out.text == "OK"
+    # Picked the flash+latest alias and cached it for the next call.
+    assert calls["generate"] == ["gemini-2.0-flash", "gemini-flash-latest"]
+    assert eng._resolved_model == "gemini-flash-latest"
+    eng.query("again")
+    assert calls["generate"][-1] == "gemini-flash-latest"  # no re-discovery
+
+
 # --- Claude --------------------------------------------------------------- #
 
 

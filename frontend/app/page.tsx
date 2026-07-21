@@ -1004,12 +1004,15 @@ function VisibilityResultView({
   const maxMention = Math.max(...r.engine_stats.map((e) => e.mention_count), 1);
   const maxComp = Math.max(...r.competitor_ranking.map((c) => c.count), 1);
   const statusPill = (er: VisEngineResult) => {
+    if (er.status === "error")
+      return { bg: "#2e2410", fg: "#fbbf24", txt: `! ${er.engine} · ${er.error || "hata"}` };
     if (er.status === "cited")
       return { bg: "#12261a", fg: "#22c55e", txt: `✓ ${er.engine} · ${er.citation_count}/${er.samples} kaynak` };
     if (er.status === "mentioned")
       return { bg: "#1e2149", fg: "#818cf8", txt: `● ${er.engine} · ${er.mention_count}/${er.samples} anıldı` };
     return { bg: "#3a1620", fg: "#f87171", txt: `✗ ${er.engine} · anılmadı` };
   };
+  const erroredEngines = r.engine_stats.filter((e) => (e.errored ?? 0) > 0);
 
   return (
     <div style={{ marginTop: 24, display: "grid", gap: 16 }}>
@@ -1065,6 +1068,26 @@ function VisibilityResultView({
           </a>
         )}
       </div>
+
+      {/* engine-failure banner */}
+      {erroredEngines.length > 0 && (
+        <div style={{ ...cardStyle, borderColor: "#a16207", background: "#2a2410" }}>
+          <h2 style={{ marginTop: 0, fontSize: 16, color: "#fbbf24" }}>
+            ⚠ Bazı motorlar yanıt veremedi
+          </h2>
+          <p style={{ margin: "0 0 8px", fontSize: 13.5, color: "#e5d3a1" }}>
+            Aşağıdaki motor(lar) çağrıları başarısız olduğu için skora dahil edilmedi.
+            Skor yalnızca yanıt veren motor/örnekler üzerinden hesaplandı.
+          </p>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#e5d3a1" }}>
+            {erroredEngines.map((e) => (
+              <li key={e.engine} style={{ margin: "3px 0" }}>
+                <b>{e.engine}</b> — {e.error || "hata"} ({e.errored} prompt başarısız)
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* engine distribution */}
       <div style={cardStyle}>
