@@ -119,7 +119,12 @@ class GeminiEngine:
         from google import genai
         from google.genai import types
 
-        client = genai.Client(api_key=self.api_key)
+        # An explicit HTTP timeout (ms) so a hung/slow grounded call can't stall
+        # the whole audit indefinitely — parity with the other adapters.
+        client = genai.Client(
+            api_key=self.api_key,
+            http_options=types.HttpOptions(timeout=_TIMEOUT * 1000),
+        )
         config = types.GenerateContentConfig(
             tools=[types.Tool(google_search=types.GoogleSearch())]
         )

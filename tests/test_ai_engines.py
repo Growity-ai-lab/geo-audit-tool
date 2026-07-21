@@ -100,13 +100,14 @@ def test_gemini_engine_parses_grounding(monkeypatch):
     )
 
     class _Client:
-        def __init__(self, api_key=None):
+        def __init__(self, api_key=None, http_options=None):
             self.models = _ns(generate_content=lambda **kw: resp)
 
     fake_types = _ns(
         GenerateContentConfig=lambda **kw: None,
         Tool=lambda **kw: None,
         GoogleSearch=lambda **kw: None,
+        HttpOptions=lambda **kw: None,
     )
     monkeypatch.setitem(sys.modules, "google", _ns(genai=_ns(Client=_Client)))
     monkeypatch.setitem(sys.modules, "google.genai", _ns(Client=_Client, types=fake_types))
@@ -129,7 +130,7 @@ def test_gemini_engine_recovers_from_model_404(monkeypatch):
     ]
 
     class _Client:
-        def __init__(self, api_key=None):
+        def __init__(self, api_key=None, http_options=None):
             self.models = _ns(
                 generate_content=self._gen,
                 list=lambda: iter(listed),
@@ -145,6 +146,7 @@ def test_gemini_engine_recovers_from_model_404(monkeypatch):
         GenerateContentConfig=lambda **kw: None,
         Tool=lambda **kw: None,
         GoogleSearch=lambda **kw: None,
+        HttpOptions=lambda **kw: None,
     )
     monkeypatch.setitem(sys.modules, "google", _ns(genai=_ns(Client=_Client)))
     monkeypatch.setitem(sys.modules, "google.genai", _ns(Client=_Client, types=fake_types))
