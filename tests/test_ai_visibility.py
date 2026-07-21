@@ -130,9 +130,47 @@ def test_analyze_engine_failure_is_isolated():
         brand="Tara Robotik", domain="tararobotik.com", prompts=ps,
         engines=engines, sample_count=1, max_api_calls=100, generated_at="x",
     )
-    # The failing engine is omitted; the working one still produces a result.
-    engines_in_result = {e["engine"] for pr in rep.prompts for e in pr["engines"]}
-    assert engines_in_result == {"ChatGPT"}
+    # The failing engine is surfaced (not silently dropped) but excluded from
+    # scoring: only ChatGPT counts toward the denominator.
+    by_engine = {e["engine"]: e for pr in rep.prompts for e in pr["engines"]}
+    assert set(by_engine) == {"ChatGPT", "Gemini"}
+    assert by_engine["Gemini"]["status"] == "error"
+    assert by_engine["Gemini"]["samples"] == 0
+    assert by_engine["Gemini"]["error"]
+    # Denominator counts only the answering engine.
+    assert rep.slot_total == 1
+    assert rep.score == 100.0  # ChatGPT mentioned + cited on the one slot
+
+
+def test_errored_engine_surfaced_in_engine_stats():
+    engines = [FakeEngine("Gemini", "gemini-flash-latest", "", raises=True)]
+    ps = build_prompts("Tara Robotik", max_prompts=2)
+    rep = analyze_visibility(
+        brand="Tara Robotik", domain="tararobotik.com", prompts=ps,
+        engines=engines, sample_count=2, max_api_calls=100, generated_at="x",
+    )
+    # All engines failed → score 0 but with an explicit error, not a silent 0.
+    assert rep.score == 0.0
+    assert rep.slot_total == 0
+    stat = next(s for s in rep.engine_stats if s["engine"] == "Gemini")
+    assert stat["errored"] == 2 and stat["answered"] == 0
+    assert stat["error"]
+
+
+def test_budget_skip_does_not_fabricate_error():
+    # An engine never reached due to the budget cap must NOT show as errored.
+    engines = [
+        FakeEngine("ChatGPT", "gpt-4o", "Tara Robotik iyi.", ["tararobotik.com"]),
+        FakeEngine("Gemini", "gemini-2.5", "ABB.", []),
+    ]
+    ps = build_prompts("Tara Robotik", max_prompts=1)
+    rep = analyze_visibility(
+        brand="Tara Robotik", domain="tararobotik.com", prompts=ps,
+        engines=engines, sample_count=1, max_api_calls=1, generated_at="x",
+    )
+    by_engine = {e["engine"]: e for pr in rep.prompts for e in pr["engines"]}
+    # Gemini was never called (budget spent on ChatGPT) → omitted, not errored.
+    assert "Gemini" not in by_engine
 
 
 def test_analyze_extractor_called_once_per_prompt_engine():

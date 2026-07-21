@@ -296,7 +296,7 @@ export ENABLE_CLAUDE_VISIBILITY=true   # opsiyonel 4. motor (ANTHROPIC_API_KEY k
 # İnce ayar (varsayılanlar):
 export OPENAI_MODEL=gpt-4o
 export PERPLEXITY_MODEL=sonar
-export GEMINI_MODEL=gemini-2.5-flash
+export GEMINI_MODEL=gemini-flash-latest
 export VISIBILITY_SAMPLE_COUNT=2       # her prompt×motor için örnek sayısı
 export VISIBILITY_MAX_PROMPTS=10       # otomatik + manuel prompt üst sınırı
 export VISIBILITY_MAX_API_CALLS=120    # bütçe kill-switch (ücretli çağrı tavanı)
@@ -305,6 +305,20 @@ export VISIBILITY_MAX_API_CALLS=120    # bütçe kill-switch (ücretli çağrı 
 > Motor adaptörleri (OpenAI / Perplexity / Gemini / Claude) resmi SDK'ların
 > belgelenmiş çağrı şekillerine göre yazıldı; uçtan uca ancak canlı anahtarlarla
 > doğrulanabilir. Ayrıştırma (parsing) mantığı mock SDK'larla test kapsamındadır.
+
+**Motor hataları sessiz kalmaz.** Bir motor (kota, geçersiz model, anahtar
+hatası vb.) yanıt veremezse rapor bunu açıkça gösterir ("⚠ Bazı motorlar yanıt
+veremedi — Gemini: Kota/limit aşıldı (429)") ve o motoru **skora dahil etmez** —
+skor yalnızca yanıt veren motor/örnekler üzerinden hesaplanır (böylece bozuk bir
+motor skoru haksızca 0'a çekmez).
+
+**Gemini ücretsiz katman uyarısı:** Google AI Studio'nun ücretsiz katmanı
+dakikada yalnızca ~5 istek verir; birden çok prompt × örnek bunu hızla aşıp
+`429 RESOURCE_EXHAUSTED` döndürür. Gerçek kullanımda Google Cloud projesinde
+**faturalandırmayı açmak** (yüksek limit) gerekir. Ayrıca belirli dated model
+ID'leri (ör. `gemini-2.5-flash`) yeni anahtarlara kapatılabildiği için varsayılan
+model, güncel Flash'ı takip eden `gemini-flash-latest` alias'ıdır; gerekirse
+`GEMINI_MODEL` ile değiştirin (ör. `gemini-2.0-flash`).
 
 ### Belirsiz bulgular için manuel onay
 

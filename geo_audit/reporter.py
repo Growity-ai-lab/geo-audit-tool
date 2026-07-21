@@ -899,6 +899,9 @@ def _vis_status_pill(er: dict) -> str:
     """Per-engine status pill with sample ratios (mention/citation over N)."""
     eng = _esc(er["engine"])
     n = er.get("samples", 1) or 1
+    if er.get("status") == "error":
+        return (f'<span class="vpill st-err"><span class="vdot">!</span>{eng} · '
+                f'{_esc(er.get("error") or "hata")}</span>')
     if er.get("status") == "cited":
         return (f'<span class="vpill st-cited"><span class="vdot">✓</span>{eng} · '
                 f'{er["citation_count"]}/{n} kaynak</span>')
@@ -971,6 +974,24 @@ def render_visibility_html(
       {eng_rows}
     </section>"""
 
+    # Engine-failure banner: if any engine errored on every prompt, say so
+    # loudly (a silent 0 reads like "brand never appears", which is wrong).
+    errored = [s for s in stats if s.get("errored")]
+    error_block = ""
+    if errored:
+        rows = "".join(
+            f'<li><b>{_esc(s["engine"])}</b> — {_esc(s.get("error") or "hata")} '
+            f'({s["errored"]} prompt başarısız)</li>'
+            for s in errored
+        )
+        error_block = f"""
+    <section class="card vis-error">
+      <h2><span class="h2-accent"></span>⚠ Bazı motorlar yanıt veremedi</h2>
+      <p>Aşağıdaki motor(lar) çağrıları başarısız olduğu için skora dahil edilmedi.
+      Skor yalnızca <b>yanıt veren</b> motor/örnekler üzerinden hesaplandı.</p>
+      <ul class="vis-error-list">{rows}</ul>
+    </section>"""
+
     # Competitor + source ranking.
     comp = d.get("competitor_ranking", [])
     max_c = max((c["count"] for c in comp), default=0) or 1
@@ -1039,7 +1060,7 @@ def render_visibility_html(
       çağrısı kullandı{('· Modeller — ' + _esc(models)) if models else ''}.</p>
     </section>"""
 
-    body = cover + summary + engines_block + ranks_block + prompts_block + note
+    body = cover + summary + error_block + engines_block + ranks_block + prompts_block + note
     shell = _html_shell(logo_html, brand, d["domain"], when, body)
     css = """
   .note {{ background:linear-gradient(135deg,var(--tint),#fff); border-color:var(--brand); }}
@@ -1063,6 +1084,11 @@ def render_visibility_html(
   .st-cited {{ color:#15803d; }} .st-cited .vdot {{ background:#16a34a; }}
   .st-ment {{ color:#4338ca; }} .st-ment .vdot {{ background:#6366f1; }}
   .st-none {{ color:#b91c1c; }} .st-none .vdot {{ background:#dc2626; }}
+  .st-err {{ color:#92400e; border-color:#fcd34d; background:#fffbeb; }} .st-err .vdot {{ background:#d97706; }}
+  .vis-error {{ border-color:#fcd34d; background:#fffbeb; }}
+  .vis-error p {{ margin:0; font-size:13.5px; color:#7c2d12; }}
+  .vis-error-list {{ margin:10px 0 0; padding-left:18px; font-size:13px; color:#7c2d12; }}
+  .vis-error-list li {{ margin:3px 0; }}
   .vresp {{ background:#faf9fe; border-left:3px solid var(--brand); border-radius:0 8px 8px 0; padding:12px 14px; font-size:13px; color:#3f3f46; margin-bottom:12px; }}
   .vresp .eng {{ font-weight:700; color:var(--ink); }}
   .vdetail {{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }}

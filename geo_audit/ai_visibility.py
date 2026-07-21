@@ -65,7 +65,13 @@ class CompetitorExtractor(Protocol):
 
 @dataclass
 class EngineResult:
-    """One engine's aggregated result for one prompt (over N samples)."""
+    """One engine's aggregated result for one prompt (over N samples).
+
+    ``samples == 0`` with ``error`` set means every call to this engine failed
+    for this prompt (e.g. quota/model error) — it is surfaced to the user but
+    kept out of the score's denominator so a broken engine can't drag the
+    number down (or inflate it).
+    """
 
     engine: str
     samples: int
@@ -74,6 +80,7 @@ class EngineResult:
     response_excerpt: str       # a representative answer (first sample)
     competitors: List[str] = field(default_factory=list)
     sources: List[str] = field(default_factory=list)
+    error: Optional[str] = None  # set when the engine failed (samples == 0)
 
     @property
     def mentioned(self) -> bool:
@@ -85,6 +92,8 @@ class EngineResult:
 
     @property
     def status(self) -> str:
+        if self.error and self.samples == 0:
+            return "error"
         if self.cited:
             return "cited"
         if self.mentioned:
@@ -101,6 +110,7 @@ class EngineResult:
             "response_excerpt": self.response_excerpt,
             "competitors": self.competitors,
             "sources": self.sources,
+            "error": self.error or "",
         }
 
 
@@ -277,9 +287,14 @@ def build_prompts(
 # --------------------------------------------------------------------------- #
 
 
+def _scored_slots(prompt_results: List[PromptResult]) -> List["EngineResult"]:
+    """(prompt × engine) results that actually answered (errored ones excluded)."""
+    return [e for pr in prompt_results for e in pr.engines if e.samples > 0]
+
+
 def score_visibility(prompt_results: List[PromptResult]) -> float:
-    """0-100 from mention/citation rates over all (prompt × engine) slots."""
-    slots = [e for pr in prompt_results for e in pr.engines]
+    """0-100 from mention/citation rates over all answered (prompt × engine) slots."""
+    slots = _scored_slots(prompt_results)
     if not slots:
         return 0.0
     mention_rate = sum(1 for e in slots if e.mentioned) / len(slots)
@@ -348,14 +363,18 @@ def analyze_visibility(
             competitors: set = set()
             sources: set = set()
             samples_done = 0
+            attempted = False
+            last_error: Optional[str] = None
 
             for i in range(sample_count):
                 if _over_budget():
                     break
+                attempted = True
                 api_calls += 1
                 try:
                     res = eng.query(ptext)
-                except Exception:  # noqa: BLE001 - one engine call must not crash the run
+                except Exception as exc:  # noqa: BLE001 - one engine call must not crash the run
+                    last_error = _short_error(exc)
                     logger.exception("engine %s failed on prompt: %s", eng.name, ptext)
                     continue
                 samples_done += 1
@@ -381,7 +400,21 @@ def analyze_visibility(
                         logger.exception("competitor extraction failed")
 
             if samples_done == 0:
-                continue  # engine unavailable for this prompt; omit
+                # Every attempt failed → surface the error (don't silently drop
+                # to 0). If we never attempted (budget hit before this engine),
+                # omit it quietly.
+                if attempted:
+                    eng_results.append(
+                        EngineResult(
+                            engine=eng.name,
+                            samples=0,
+                            mention_count=0,
+                            citation_count=0,
+                            response_excerpt="",
+                            error=last_error or "Motor yanıt vermedi",
+                        )
+                    )
+                continue
             eng_results.append(
                 EngineResult(
                     engine=eng.name,
@@ -396,7 +429,7 @@ def analyze_visibility(
         prompt_results.append(PromptResult(ptext, psource, eng_results))
 
     score = score_visibility(prompt_results)
-    slots = [e for pr in prompt_results for e in pr.engines]
+    slots = _scored_slots(prompt_results)
     engine_stats = _engine_stats(engines, prompt_results)
 
     return VisibilityReport(
@@ -426,12 +459,38 @@ def _engine_stats(
     stats = []
     for eng in engines:
         results = [e for pr in prompt_results for e in pr.engines if e.engine == eng.name]
+        answered = [e for e in results if e.samples > 0]
+        errored = [e for e in results if e.samples == 0 and e.error]
         stats.append(
             {
                 "engine": eng.name,
-                "mention_count": sum(1 for e in results if e.mentioned),
-                "citation_count": sum(1 for e in results if e.cited),
-                "answered": len(results),
+                "mention_count": sum(1 for e in answered if e.mentioned),
+                "citation_count": sum(1 for e in answered if e.cited),
+                "answered": len(answered),
+                "errored": len(errored),
+                # A representative error message for the UI (all failures on one
+                # engine are almost always the same cause: quota / model / key).
+                "error": errored[0].error if errored else "",
             }
         )
     return stats
+
+
+def _short_error(exc: Exception) -> str:
+    """Turn a provider exception into a short, human-readable Turkish reason.
+
+    LLM SDKs raise errors whose ``str`` is a large JSON blob; we surface a one
+    line cause the operator can act on, and fall back to the exception type."""
+    msg = str(exc)
+    low = msg.lower()
+    if any(k in low for k in ("resource_exhausted", "rate limit", "quota", "429")):
+        return "Kota/limit aşıldı (429) — API planının istek limitine takıldı"
+    if any(k in low for k in ("not_found", "404")):
+        return "Model bulunamadı (404) — model adı geçersiz ya da anahtarın erişimi yok"
+    if any(k in low for k in ("unauthenticated", "permission_denied", "invalid api key",
+                              "401", "403")):
+        return "Kimlik/anahtar hatası (401/403) — API anahtarını kontrol edin"
+    if any(k in low for k in ("timeout", "timed out")):
+        return "Zaman aşımı — motor yanıt vermedi"
+    first = (msg.strip().splitlines() or [""])[0][:180]
+    return f"{type(exc).__name__}: {first}" if first else type(exc).__name__

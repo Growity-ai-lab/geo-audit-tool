@@ -104,7 +104,7 @@ class GeminiEngine:
 
     name = "Gemini"
 
-    def __init__(self, api_key: str, model: str = "gemini-2.5-flash"):
+    def __init__(self, api_key: str, model: str = "gemini-flash-latest"):
         self.api_key = api_key
         self.model = model
 
@@ -279,7 +279,7 @@ def build_engines(
     claude_key: str = "",
     openai_model: str = "gpt-4o",
     perplexity_model: str = "sonar",
-    gemini_model: str = "gemini-2.5-flash",
+    gemini_model: str = "gemini-flash-latest",
     claude_model: str = "claude-haiku-4-5",
     enable_claude: bool = False,
 ) -> list:

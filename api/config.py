@@ -87,8 +87,11 @@ class Settings:
     perplexity_model: str = field(
         default_factory=lambda: os.environ.get("PERPLEXITY_MODEL", "sonar")
     )
+    # A rolling alias so the default tracks the current Flash model (specific
+    # dated IDs get retired for new keys). Override with GEMINI_MODEL if your
+    # key needs a specific model (e.g. gemini-2.0-flash).
     gemini_model: str = field(
-        default_factory=lambda: os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+        default_factory=lambda: os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
     )
     enable_claude_visibility: bool = field(
         default_factory=lambda: os.environ.get(
